@@ -15,6 +15,7 @@ Prepare signed APKs, review one immutable publishing plan, submit selected chann
 - [Mac installation and distribution](docs/mac-cli-delivery.md)
 - [Channel capabilities and evidence](docs/channels/protocol-evidence.md)
 - [Architecture](docs/architecture.md), [roadmap](docs/execution-plan.md), and [contributing](CONTRIBUTING.md)
+- [Public beta acceptance](docs/public-beta-acceptance.md)
 
 An Apple Silicon Mac, Android SDK Build Tools, and a compatible JDK are needed to inspect real APKs. A packaged CLI needs no Go or Node.js installation for API publishing. The browser observer is currently a simulation and acceptance-test facility, not a production login prerequisite.
 

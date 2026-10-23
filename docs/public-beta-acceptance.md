@@ -84,3 +84,9 @@ metadata. Contributor web-identity privacy is a prerequisite before opening a
 pull request. Cloud checks and a draft preview are repeated against this clean
 public baseline. Earlier evaluation artifacts are retained privately; no earlier
 Git objects are imported into this repository.
+
+Independent review confirmed that the fresh public baseline has one noreply root
+commit, no earlier Git objects, and only documentation differences from the
+reviewed source. Anonymous checks cannot resolve the earlier test-merge object
+through either the public repository or its private archive. Contributor account
+privacy was checked before opening the clean repository's acceptance PR.
