@@ -1,40 +1,39 @@
-# Public roadmap and acceptance
+# 公开版本路线图与验收
 
-The public beta targets Apple Silicon Macs and a local API-first workflow for six Android stores. Production store credentials and application artifacts stay on the operator's Mac.
+公开测试版面向 Apple Silicon Mac，以本地 API 操作为主要方式，覆盖六个 Android 渠道。渠道生产凭据和应用产物保留在操作者的 Mac 上。
 
-## Initial beta scope
+## 首个测试版范围
 
-| Area | Implementation and acceptance scope |
+| 领域 | 实现与验收范围 |
 | --- | --- |
-| Local core | Offline frozen plans, APK signature inspection, durable intents/receipts, SQLite recovery barriers |
-| Credentials and HTTP | macOS Keychain references, account coordination, controlled origins, bounded uploads and responses |
-| Six protocols | Independently implemented vendor request/response contracts with synthetic protocol tests |
-| Daily workflow | Reusable setup, explicit APK/notes preparation, reviewed batch approval, submit/reconcile/resume |
-| Observations | Separate execution/review/availability/health; labeled Xiaomi inference and unassociated MyApp facts |
-| History and reports | Offline history; private Markdown/JSON exports with source, time, context, and full-scope counts |
-| Mac delivery | arm64 packaging; install/upgrade/rollback/uninstall and tamper rejection acceptance |
-| Repository workflow | Public-data hygiene, MIT license, PR-based main, required CI, and reviewed draft releases |
+| 本地内核 | 离线冻结计划、APK 签名检查、持久化意图与回执、SQLite 恢复屏障 |
+| 凭据与 HTTP | macOS 钥匙串引用、账号协调、受控请求来源、上传和响应限制 |
+| 六渠道协议 | 独立实现渠道请求与响应约定，并以合成数据测试 |
+| 日常操作 | 可复用配置、明确指定 APK 和更新说明、审阅批次批准、提交、核对和继续执行 |
+| 状态观测 | 分开记录执行、审核、上架和健康状态；标注小米推测及应用宝未关联信息 |
+| 历史与报告 | 离线历史；私有 Markdown/JSON 导出，包含来源、时间、参考信息和完整范围统计 |
+| Mac 交付 | arm64 打包；安装、升级、回滚、卸载及拒绝篡改的验收 |
+| 仓库流程 | 公开信息检查、MIT 许可证、main 通过 PR 合并、必需 CI 和经审阅的草稿发布 |
 
-The acceptance suite uses synthetic inputs. Nothing in this table certifies a real vendor account or application. The current capability catalog is available offline with `release protocols`; detailed boundaries are in [protocol evidence](channels/protocol-evidence.md).
+验收使用合成输入。表中任何一项都不代表已核实真实渠道账号或应用。`release protocols` 可离线查看当前能力目录，详细边界见[协议验证依据](channels/protocol-evidence.md)。
 
-See the [public beta acceptance record](public-beta-acceptance.md) for local,
-independent-review, hosted-CI, and release evidence.
+本地验证、独立审查、云端 CI 和发布证据见[公开测试版验收记录](public-beta-acceptance.md)。
 
-## Required acceptance for changes
+## 变更验收要求
 
-1. Run focused tests for the changed behavior and the complete `PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check` with pinned runtimes.
-2. For write/recovery changes, inject lost responses and terminate a real subprocess; verify no duplicate business write after restart.
-3. For observation changes, exercise missing fields, old versions, unknown codes, partial failures, and stale cached evidence. Verify the approved/live counts and write barriers remain unchanged by context-only facts.
-4. For delivery changes, inspect the archive allowlist and run installation, upgrade, rollback, uninstall, tampering, and symlink-rejection checks.
-5. Independently review credential, transport, publishing, recovery, public-data, and workflow changes. Resolve material findings before merge/release.
-6. Require CI on the exact merge candidate and review the draft release's provenance, checksums, distribution status, and notes before publication.
+1. 针对变更行为运行专项测试，并使用固定版本的运行环境执行完整的 `PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check`。
+2. 修改写入或恢复逻辑时，注入响应丢失故障并真实终止子进程，确认重启后不会重复业务写入。
+3. 修改观测逻辑时，覆盖缺失字段、旧版本、未知状态码、部分失败和过期缓存证据。确认仅有参考信息时，不会改变审核通过、上架数量或写入屏障。
+4. 修改交付逻辑时，检查压缩包允许清单，验收安装、升级、回滚、卸载、篡改和符号链接拒绝行为。
+5. 对凭据、传输、发布、恢复、公开信息和工作流变更进行独立审查，合并或发布前解决实质性问题。
+6. CI 必须检查准确的待合并提交；公开发布前，审阅草稿的来源、校验和、分发状态和说明。
 
-## Remaining work
+## 后续工作
 
-- Validate each operator's account permissions and application binding locally, starting with read-only commands and a test application.
-- Expand verified read-only recovery evidence where vendor protocols support it. Keep undocumented lost-response paths blocked.
-- Add more synthetic compatibility cases when vendor documents or response shapes change.
-- Provide Developer ID signing and Apple notarization as a separately configured release capability; CI preview packages do not supply it.
-- Add a second human maintainer and require a review approval when that collaboration model is available.
+- 在本机验证每位操作者的账号权限和应用绑定，从只读命令和测试应用开始。
+- 渠道协议支持时，补充经过验证的只读恢复证据。文档未说明的响应丢失路径继续保持阻塞。
+- 渠道文档或响应结构变化时，增加合成数据兼容测试。
+- 将 Developer ID 签名和 Apple 公证作为独立配置的发布能力；CI 预览包不提供这些能力。
+- 增加第二名人工维护者，并在具备相应协作条件后要求审查批准。
 
-Browser login and manually entered status are exceptional evidence paths, not routine requirements. New production automation, scheduling, first-time listings, scheduled release policies, and broader platform support need separate scope and acceptance.
+浏览器登录和人工状态录入仅用于特殊证据补充，不是日常前提。新增生产自动化、调度、首次上架、定时发布规则和更多平台支持，需要另行明确范围并验收。

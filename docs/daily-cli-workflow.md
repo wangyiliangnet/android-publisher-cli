@@ -1,18 +1,18 @@
-# Daily CLI workflow
+# 日常操作与恢复
 
-Use one local project profile for a package, approved signer, and fixed channel set. Use one new immutable batch ID for each distinct publishing intent. All examples below use synthetic identifiers and absolute input paths.
+一个本地项目配置对应一个包名、一份批准签名和固定的渠道集合。每份不同的发布意图使用新的不可变批次 ID。以下示例均使用合成标识和绝对输入路径。
 
-## Configure once
+## 一次性配置
 
 ```sh
 release setup --project demo --apk "/absolute/path/trusted.apk"
 ```
 
-The wizard verifies the selected signed APK and asks you to approve its package and signer. It then saves only public configuration and Keychain reference names. It does not read credentials or call a channel. Cancellation and EOF do not save a profile; replacing a profile requires `--replace` and final confirmation.
+向导验证所选已签名 APK，请你确认包名和签名，然后只保存公开配置与钥匙串引用名称。它不会读取凭据或访问渠道。取消或遇到 EOF 时不保存配置；替换已有配置需指定 `--replace` 并最终确认。
 
-Import credentials separately through `release credentials import`. The hidden terminal prompt keeps secret values out of arguments and shell history. `--file` imports exact bytes from an owner-private regular file, appropriate for a Huawei service-account JSON or Xiaomi public certificate. `--replace` explicitly replaces an existing entry. Never use an issue or a pull request as a credential transport.
+另行使用 `release credentials import` 导入凭据。终端隐藏输入可避免密钥进入参数和 shell 历史。`--file` 从仅所有者可读的普通文件原样导入字节，适用于华为服务账号 JSON 或小米公钥证书。`--replace` 明确替换已有条目。不要通过 issue 或 PR 传递凭据。
 
-## Prepare, preflight, and review
+## 准备、预检与审阅
 
 ```sh
 release prepare --project demo --batch demo-1-0-0 \
@@ -24,15 +24,15 @@ release batch review --batch demo-1-0-0 \
   --file "/absolute/path/new-approval.json"
 ```
 
-This example assumes a profile containing exactly OPPO and HONOR. Provide an explicit APK for every configured channel. Preparation checks the package, approved signer, version name/code, and file hashes before freezing. It does not search for an APK or choose the newest file for you.
+本例假设项目只配置 OPPO 和荣耀。每个已配置渠道都必须明确提供 APK。准备阶段会检查包名、批准签名、版本名、版本号和文件哈希，再冻结输入；不会替你搜索 APK 或选择最新文件。
 
-`prepare` and `plan` are offline. `preflight` reads vendor state and may coordinate token lifecycle, but cannot upload or submit the app. `batch review` is a local check; it requires saved preflights for the selected channels and creates a new approval file without replacing an old one.
+`prepare` 和 `plan` 离线执行。`preflight` 读取渠道状态，可能协调令牌生命周期，但不能上传或提审。`batch review` 在本机检查，要求选定渠道已有保存的预检，并创建新的批准文件，不覆盖旧文件。
 
-Review the package, public account/application identifiers, version, APK and signer hashes, notes, notes changes where available, selected channels, and `after_approval` publication policy. The returned `approval_plan` covers these inputs and their frozen bindings. Approval files contain publishing details and should remain private.
+请审阅包名、公开账号和应用标识、版本、APK 与签名哈希、更新说明、可用时的说明变更、选定渠道，以及 `after_approval` 发布规则。返回的 `approval_plan` 覆盖这些输入及其冻结绑定。批准文件包含发布详情，应保密保存。
 
-The file-based alternative is `release init --file "/absolute/path/new-input.json"`, followed by `release prepare --file "/absolute/path/input.json"`. Edit its placeholders with public identifiers and Keychain references only. Do not combine `--file` with project preparation flags.
+也可使用文件方式：先运行 `release init --file "/absolute/path/new-input.json"`，再运行 `release prepare --file "/absolute/path/input.json"`。只用公开标识和钥匙串引用替换占位内容，不要将 `--file` 与项目准备参数混用。
 
-## Explicitly submit
+## 明确提交
 
 ```sh
 release batch submit --batch demo-1-0-0 \
@@ -40,11 +40,11 @@ release batch submit --batch demo-1-0-0 \
   --approve-plan APPROVAL_PLAN_FROM_REVIEW
 ```
 
-This command performs real uploads and submission. The digest must exactly match the reviewed file and current frozen inputs. All selected inputs are checked before the first channel dispatch. Changed APKs, configuration, notes, preflights, or channel selection require a new review as applicable.
+这条命令会真实上传并提审。摘要必须与已审阅文件及当前冻结输入完全匹配。首个渠道派发前，会先检查全部选定输入。APK、配置、更新说明、预检或渠道选择发生变化时，需按变更情况重新审阅。
 
-To publish a subset, include the same `--channels oppo,honor` selection in both review and submit/resume. The approval file binds its selection. Results still include the complete batch scope; success for a subset is not success for the whole batch.
+仅提交部分渠道时，在审阅和提交或继续执行时指定相同的 `--channels oppo,honor`。批准文件会绑定该选择。结果仍包含完整批次范围，部分渠道成功不等于整个批次成功。
 
-## Query and report
+## 查询与报告
 
 ```sh
 release batch status --batch demo-1-0-0 --refresh
@@ -56,13 +56,13 @@ release report --release demo-1-0-0-oppo \
   --format json --file "/absolute/path/new-report.json"
 ```
 
-Without `--refresh`, batch status uses local cached state. `watch` periodically performs read-only queries and respects each target's durable next-check time. Ctrl-C stops watching; it does not cancel vendor review.
+不带 `--refresh` 时，批次状态读取本地缓存。`watch` 定期执行只读查询，并遵守各目标已持久化的下次检查时间。Ctrl-C 停止观测，不会取消渠道审核。
 
-Execution, review, availability, and query health are separate columns. `accepted` means the store accepted a submission, not that the version passed review or became live. Automatic context and inference have separate labels and collection times. See [automatic observation](channels/automatic-observation.md) for Xiaomi and MyApp boundaries.
+执行、审核、上架和查询健康状态分列显示。`accepted` 表示商店已受理提交，不代表审核通过或上架。自动采集的信息和推测有独立标签及采集时间。小米和应用宝的限制见[自动查询说明](channels/automatic-observation.md)。
 
-`history` and `report` read local cache only. Reports cover the complete selected release or saved batch, including operation summaries, evidence sources, timestamps, and hashes. They omit credentials, credential references, private account configuration, remote operation references, and raw responses. Application information, notes, and rejection explanations can still be sensitive; review before sharing. Report destinations must be new absolute files in an existing parent directory without symlinks.
+`history` 和 `report` 只读本地缓存。报告覆盖完整的选定发布或已保存批次，包括操作摘要、证据来源、时间和哈希，不包含凭据、凭据引用、私有账号配置、远端操作引用和原始响应。应用信息、更新说明和驳回原因仍可能敏感，分享前请检查。报告目标必须是新建的绝对路径文件，其父目录已存在且路径中没有符号链接。
 
-## Recover safely
+## 安全恢复
 
 ```sh
 release batch reconcile --batch demo-1-0-0
@@ -71,24 +71,24 @@ release batch resume --batch demo-1-0-0 \
   --approve-plan APPROVAL_PLAN_FROM_REVIEW
 ```
 
-Reconciliation is read-only. Resume skips accepted targets and preserves the exact approval gate. Unknown writes block the conflicting target rather than being sent again. Vendor-specific authorization replacement or renewal is an exceptional single-channel workflow and is not silently applied to a batch.
+核对只读。继续执行会跳过已受理目标，并保留准确的批准检查。未知写入会阻塞冲突目标，不会再次发送。渠道特定的授权替换或续期属于特殊的单渠道操作，不会静默应用到整个批次。
 
-A network error or killed process does not prove the remote side did nothing. If the CLI cannot establish the outcome from verified evidence, retain the records and investigate the specific operation. Do not edit SQLite, delete an operation, create a new release to bypass a block, or treat Xiaomi/MyApp context as reconciliation proof.
+网络错误或进程被终止不能证明远端没有生效。CLI 无法通过已验证证据确认结果时，应保留记录并调查具体操作。不要编辑 SQLite、删除操作、新建发布绕过阻塞，或用小米和应用宝的参考信息作为核对依据。
 
-## Local files and backup
+## 本地文件与备份
 
-- Runtime: `~/Library/Application Support/AndroidPublisherCLI/`
-- Simulation: `~/Library/Application Support/AndroidPublisherCLI/Simulation/`
-- Logs: `~/Library/Logs/AndroidPublisherCLI/`
-- Keychain service prefix: `io.github.wangyiliangnet.android-publisher-cli.v1`
+- 运行状态：`~/Library/Application Support/AndroidPublisherCLI/`
+- 模拟状态：`~/Library/Application Support/AndroidPublisherCLI/Simulation/`
+- 日志：`~/Library/Logs/AndroidPublisherCLI/`
+- 钥匙串服务前缀：`io.github.wangyiliangnet.android-publisher-cli.v1`
 
 ```sh
 release state backup --to "/absolute/path/new-backup-directory"
 release state recovery-status
 ```
 
-A backup is sensitive and is not a complete machine migration. Credentials, all reusable configuration/input files, and external account permissions require separate handling. Restoring with `release state restore --from "/absolute/path/backup-directory"` activates a recovery barrier and requires inventory reconciliation before writes. Restore is not a routine solution to a failed submission.
+备份包含敏感数据，不等于整机迁移。凭据、全部可复用配置和输入文件、外部账号权限需另行处理。使用 `release state restore --from "/absolute/path/backup-directory"` 恢复后会启用恢复屏障，写入前必须完成清单核对。恢复备份不是处理提交失败的常规方法。
 
-## Output conventions
+## 输出约定
 
-Most commands emit structured JSON to stdout; setup and batch review put human prompts or previews on stderr. Status/history tables are intended for people; use `--format json` where supported for scripts. Check the process exit status and `effect`/`next_action`, not just a success-looking line. Code `130` indicates cancellation. Authentication, configuration, local-state, and unresolved-operation failures need different follow-up; use the returned safe instruction rather than retrying all errors alike.
+大多数命令向 stdout 输出结构化 JSON；配置向导和批次审阅将提示或预览写入 stderr。状态和历史表格供人工阅读，脚本可在支持时使用 `--format json`。判断结果时应检查进程退出状态及 `effect`/`next_action`，不能只看某一行是否像成功提示。退出码 `130` 表示取消。鉴权、配置、本地状态和未决操作故障的处理方式不同，应遵循返回的安全操作提示，不要对所有错误一律重试。

@@ -1,27 +1,27 @@
-# Changelog
+# 更新记录
 
 ## 0.1.0-beta.3
 
-- Establish the clean public source baseline with noreply commit identities.
-- Retain the reviewed package documentation and complete acceptance gates.
-- Allow the existing bounded 30-second budget for real Chromium acceptance on cold runners.
+- 建立脱敏后的公开源码基线，提交身份使用 noreply 邮箱。
+- 保留已审查的安装包文档和完整验收要求。
+- 真实 Chromium 验收在冷启动运行器上使用协议已有的 30 秒时限。
 
 ## 0.1.0-beta.2
 
-- Fix the packaged changelog's distribution-notes link.
-- Check every packaged root Markdown document for missing offline links.
+- 修复安装包中更新记录指向分发说明的链接。
+- 检查安装包根目录的每份 Markdown 文档，防止离线链接缺失。
 
-Distribution status remains CI preview: ad-hoc signed and unnotarized.
+分发状态仍为 CI 预览：使用 ad-hoc 临时签名，未公证。
 
 ## 0.1.0-beta.1
 
-Initial public beta:
+首个公开测试版包括：
 
-- Local six-channel APK planning, explicit publishing approval, durable operation receipts, and guarded recovery.
-- Reusable project setup, batch preparation, submission, reconciliation, and resume.
-- Automatic Xiaomi version context and labeled review inference; MyApp audit context, sanitized rejection reasons, and public-store version context.
-- Cached history and private Markdown/JSON reports.
-- Apple Silicon installation, upgrade, rollback, and uninstall scripts.
-- Synthetic protocol, browser, Android signature, and subprocess recovery acceptance tests, plus GitHub CI and a draft release workflow.
+- 六渠道本地 APK 发布计划、明确批准、持久化操作回执和受约束的恢复。
+- 可复用的项目配置、批次准备、提交、核对和继续执行。
+- 自动查询小米版本并标注审核推测；读取应用宝审核信息、脱敏驳回原因和公开商店版本。
+- 缓存历史及私有 Markdown/JSON 报告。
+- Apple Silicon 安装、升级、回滚和卸载脚本。
+- 合成数据协议、浏览器、Android 签名及子进程恢复验收，以及 GitHub CI 和草稿发布工作流。
 
-This public release starts at a new version baseline. It makes no claim of live vendor-account verification. CI preview artifacts are ad-hoc signed and unnotarized; see [distribution notes](docs/mac-cli-delivery.md).
+公开版本采用新的版本基线，不宣称已验证真实渠道账号。CI 预览产物使用 ad-hoc 临时签名，未公证，详见[分发说明](docs/mac-cli-delivery.md)。

@@ -1,38 +1,38 @@
-# Architecture
+# 架构说明
 
-The CLI is a local executor with a durable journal. It separates a user's approved publishing intent from vendor protocols, credentials, and observations.
+CLI 是带有持久化日志的本地执行器，将用户批准的发布意图与渠道协议、凭据和观测结果分开处理。
 
-| Area | Responsibility |
+| 模块 | 职责 |
 | --- | --- |
-| `internal/cli` | Setup, immutable batch preparation, approval files, commands, history, and reports |
-| `internal/artifact` and `internal/manifest` | APK inspection, hashes, signer checks, and frozen release snapshots |
-| `internal/engine` and `internal/state` | Dispatch, SQLite operation journal, evidence projection, and recovery barriers |
-| `internal/channels` and `internal/protocol` | Typed vendor operations, validation, capability boundaries, and observations |
-| `internal/account`, `internal/credentials`, `internal/transport` | Account coordination, Keychain references, controlled HTTP, and upload grants |
-| `internal/simulation` and `internal/browser` | Loopback stores, synthetic browser fixtures, and failure acceptance tests |
+| `internal/cli` | 配置向导、不可变批次准备、批准文件、命令、历史和报告 |
+| `internal/artifact` 和 `internal/manifest` | APK 检查、哈希、签名校验和冻结的发布快照 |
+| `internal/engine` 和 `internal/state` | 派发、SQLite 操作日志、证据投影和恢复屏障 |
+| `internal/channels` 和 `internal/protocol` | 类型明确的渠道操作、验证、能力边界和观测 |
+| `internal/account`, `internal/credentials`, `internal/transport` | 账号协调、钥匙串引用、受控 HTTP 和上传授权 |
+| `internal/simulation` 和 `internal/browser` | 本机回环模拟渠道、合成浏览器页面和故障验收测试 |
 
-## Publishing path
+## 发布路径
 
-`setup` saves a reusable local profile containing the package, approved signer, public account identifiers, and Keychain reference names. `prepare` inspects explicit APK inputs, checks all channels agree on package/version/signer, freezes artifacts and notes, and creates an immutable batch. Neither command contacts a vendor.
+`setup` 保存可复用的本地配置，包括包名、批准签名、公开账号标识和钥匙串引用名称。`prepare` 检查明确指定的 APK，确认各渠道包名、版本和签名一致，冻结产物与更新说明，并创建不可变批次。这两条命令都不访问渠道。
 
-`preflight` reads the account/application baseline and binds it to the frozen intent. `batch review` verifies the saved inputs and creates a new immutable approval file. Its digest binds the selected channels, APKs, notes, policy, configuration, and saved preflight. `batch submit` validates the reviewed plan before dispatching any selected target.
+`preflight` 读取账号和应用基准，并将其绑定到已冻结的意图。`batch review` 检查已保存的输入，创建新的不可变批准文件。批准摘要绑定选定渠道、APK、更新说明、发布规则、配置和已保存的预检。`batch submit` 在向任何选定目标派发前，先验证已审阅的计划。
 
-Each business operation is journaled before its request. Only a verified response can produce an applied receipt. A lost response produces uncertainty, not permission to retry. `reconcile` is read-only; `resume` keeps the original approval and unresolved-write checks. A prior unresolved release also blocks conflicting writes for the same channel, account, and application.
+每项业务操作都先记入日志，再发出请求。只有经过验证的响应才能生成已生效回执。响应丢失意味着结果不确定，不能据此重试。`reconcile` 只读；`resume` 仍需通过原批准和未决写入检查。较早的发布存在未决写入时，也会阻止同一渠道、账号和应用的冲突写入。
 
-## States and evidence
+## 状态与证据
 
-Execution, review, availability, and query health are independent. A successful submission means accepted by the endpoint; it does not mean review approval or store availability. Unknown fields and old-version evidence cannot silently establish target success. Source, collection time, and disputes accompany observed facts.
+执行、审核、上架和查询健康状态相互独立。提交成功表示接口已受理，不等于审核通过或商店已上架。未知字段和旧版本证据不能直接确认目标成功；观测事实同时记录来源、采集时间和争议。
 
-Xiaomi version comparison and MyApp's unversioned audit slot live in a separate `channel_context`. They never resolve an unknown write or increase verified approved/live counts. Current source health and retained cached context are distinct, so an API failure does not erase useful cached data or make it appear fresh.
+小米版本比较和应用宝未绑定版本的审核信息保存在独立的 `channel_context` 中，不能解决未知写入，也不能增加已核实的审核通过或上架数量。当前来源健康状态与保留的缓存信息分开记录，因此 API 失败既不会删除有用缓存，也不会使缓存看起来像刚采集的数据。
 
-## Local storage and concurrency
+## 本地存储与并发
 
-Production data uses `~/Library/Application Support/AndroidPublisherCLI/`, with simulation state in its `Simulation/` child. Logs use `~/Library/Logs/AndroidPublisherCLI/`. Keychain service names begin with `io.github.wangyiliangnet.android-publisher-cli.v1`.
+生产数据保存在 `~/Library/Application Support/AndroidPublisherCLI/`，模拟状态保存在其 `Simulation/` 子目录中。日志保存在 `~/Library/Logs/AndroidPublisherCLI/`。钥匙串服务名以 `io.github.wangyiliangnet.android-publisher-cli.v1` 开头。
 
-State uses SQLite WAL with full synchronization and one active local writer. Account lifecycle and application ownership prevent conflicting work. Private-file helpers reject unsafe paths and permissions. Do not move or edit a database while a command is active.
+状态使用 SQLite WAL、完全同步和单一本地活跃写入者。账号生命周期协调与应用所有权机制阻止冲突操作。私有文件辅助逻辑拒绝不安全的路径和权限。命令运行期间不要移动或编辑数据库。
 
-Backups contain journal state and associated frozen evidence/artifacts covered by the backup implementation. They are not a complete machine migration: Keychain items, all external input files, and developer account permissions need separate handling. Restore enters a recovery barrier; it does not authorize new writes.
+备份包含备份实现覆盖的日志状态及关联的冻结证据和产物，但不等于整机迁移：钥匙串条目、全部外部输入文件和开发者账号权限仍需另行处理。恢复备份后会进入恢复屏障，不会因此获得新的写入授权。
 
-## Acceptance boundary
+## 验收边界
 
-Tests use synthetic accounts, credentials, APKs, responses, local HTTP servers, and browser pages. Real subprocess termination exercises journal recovery. The public test result means the implementation meets those contracts; vendor permissions, undocumented behavior, and live account state remain outside that claim.
+测试使用合成账号、凭据、APK、响应、本地 HTTP 服务和浏览器页面，并通过真实终止子进程验证日志恢复。公开测试结果只说明实现满足这些约定，不代表已验证渠道权限、未公开行为或真实账号状态。

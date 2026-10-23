@@ -1,56 +1,48 @@
-# Branch, merge, and release process
+# 分支、合并与发布流程
 
-The default branch is `main`. A topic branch becomes a pull request, required CI passes on the up-to-date merge candidate, review conversations are resolved, and the change is squash-merged. A version tag is created only by the explicit draft release workflow after its own validation.
+默认分支为 `main`。工作分支通过 PR 合并，要求最新待合并提交的必需 CI 通过、审查讨论已解决，并采用 squash 合并。只有明确触发的草稿发布工作流在完成自身验证后，才会创建版本标签。
 
-## Branches and merge gates
+## 分支与合并条件
 
-- Branch from current `main`: `feat/topic`, `fix/topic`, `docs/topic`, or `codex/topic` for automated work.
-- Open a PR against `main`; describe behavior, validation, compatibility/recovery implications, protocol sources, and public-data checks as relevant.
-- The main ruleset requires a PR, the stable CI check named **`check`**, an up-to-date branch, resolved conversations, and squash merge. Force pushes and branch deletion are blocked.
-- This project initially has one human maintainer, so the mandatory GitHub approval count is zero. Use independent review for sensitive changes; subagent review is supporting evidence, not a GitHub human approval. Require at least one human approval when a second maintainer joins.
-- Delete merged topic branches. Never merge a failing or stale check by treating an unrelated earlier run as evidence.
+- 从最新 `main` 创建 `feat/topic`、`fix/topic`、`docs/topic`，自动化工作可使用 `codex/topic`。
+- 向 `main` 提交 PR，按需说明行为、验证、兼容或恢复影响、协议来源及公开信息检查。
+- main 规则集要求 PR、名为 **`check`** 的固定 CI 检查、分支保持最新、讨论已解决，并采用 squash 合并。禁止强制推送和删除 main。
+- 项目初期只有一名人工维护者，GitHub 必需批准数量为零。敏感变更仍应独立审查；subagent 审查是补充依据，不等于 GitHub 人工批准。第二名维护者加入后，应要求至少一名人工批准。
+- 删除已合并的工作分支。不得用无关的旧运行结果，绕过失败或已过期的检查。
 
-These rules govern the CLI repository. Merging a PR never authorizes an Android store upload or submission.
+这些规则约束 CLI 仓库。合并 PR 不构成 Android 商店上传或提审授权。
 
-## CI contract
+## CI 约定
 
-The `CI` workflow runs on pull requests, pushes to `main`, and manual dispatch. Its required job is `check`. It uses the standard Apple Silicon `macos-15` runner and pinned Go, Node.js/npm, Java, Android platform/build-tools, and Chromium dependencies.
+`CI` 工作流在 PR、推送到 `main` 和手动触发时运行，必需任务名为 `check`。它使用标准 Apple Silicon `macos-15` 运行器，并固定 Go、Node.js/npm、Java、Android 平台与构建工具及 Chromium 依赖。
 
-The check runs `PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check`. This includes formatting, Go static checks, race-enabled tests, Android signature integration, real Chromium acceptance with local fixtures, subprocess recovery coverage, and a build. Required test families must fail when a prerequisite is missing instead of quietly skipping. Workflow/script checks cover the automation itself.
+检查执行 `PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check`，涵盖格式、Go 静态检查、竞态测试、Android 签名集成、使用本地页面的真实 Chromium 验收、子进程恢复和构建。必需测试缺少前提环境时必须失败，不能静默跳过；工作流和脚本检查也覆盖自动化本身。
 
-Actions are pinned to full upstream commit SHAs. Normal checks have read-only repository permissions, bounded run time, and cancellation of superseded runs. Tests use synthetic data and temporary test identities; no channel credential, real application APK, production state, Apple signing certificate, or personal browser session is required.
+Actions 固定到上游完整提交 SHA。常规检查只有仓库只读权限，设有运行时限，并取消被新运行取代的旧检查。测试使用合成数据和临时身份，不需要渠道凭据、真实应用 APK、生产状态、Apple 签名证书或个人浏览器会话。
 
-## Version policy
+## 版本规则
 
-The first public beta is `0.1.0-beta.1`. Use SemVer-style versions without a leading `v` as workflow input; the release tag is `vVERSION`. Development builds report a development version and commit when available. Never replace a published tag or reuse a package version for different bytes.
+首个公开测试版为 `0.1.0-beta.1`。工作流输入采用不带 `v` 前缀的 SemVer 风格版本，标签为 `vVERSION`。开发构建在可用时报告开发版本及提交。不得替换已发布标签，或以同一安装包版本承载不同字节。
 
-Update [CHANGELOG.md](../CHANGELOG.md) through a PR before preparing a release. Document user-visible changes, migration requirements, known limitations, and distribution/signing status. Beta versioning does not remove the obligation to explain state compatibility.
+准备发布前，通过 PR 更新 [CHANGELOG.md](../CHANGELOG.md)，说明用户可见变化、迁移要求、已知限制和分发签名状态。测试版也需说明状态兼容性。
 
-## Prepare a draft release
+## 准备草稿发布
 
-1. Merge the release notes and fixes through the normal PR gate. Verify `main` is at the intended commit and its required CI is green.
-2. In GitHub Actions, manually run the release workflow on current `main`, entering a version such as `0.1.0-beta.1` without the `v` prefix.
-3. The workflow validates the version and ref, reruns checks, builds an ad-hoc signed arm64 CI preview, and performs two-version package installation/upgrade/rollback/uninstall and tamper/symlink rejection acceptance. It creates the version tag and a **draft** GitHub release only after success.
-4. Review the draft's exact tag/commit, package metadata, checksums, license/notices, installation results, and notes. Inspect the archive allowlist. Confirm it contains no account files, secrets, application APKs, runtime state, raw responses, or private documentation.
-5. Confirm the release explicitly states **CI preview, ad-hoc signed, unnotarized, no stable trusted Keychain identity**. Mark beta releases as prereleases. Download and verify the published candidate bytes if the draft is to be distributed.
-6. Publish the draft manually after this final review. The workflow does not publish a public release automatically and never submits an Android app to a store.
+1. 通过正常 PR 合并发布说明和修复，确认 `main` 位于预期提交且必需 CI 已通过。
+2. 在 GitHub Actions 中，对当前 `main` 手工运行发布工作流，输入不带 `v` 前缀的版本，例如 `0.1.0-beta.1`。
+3. 工作流验证版本与引用、重新检查、构建 ad-hoc 签名的 arm64 CI 预览包，并验收双版本安装、升级、回滚、卸载及篡改和符号链接拒绝行为。全部成功后才创建版本标签和 GitHub 发布**草稿**。
+4. 审阅草稿的准确标签与提交、安装包元数据、校验和、许可证与声明、安装结果和说明。检查压缩包允许清单，确认不含账号文件、密钥、应用 APK、运行状态、原始响应或私有文档。
+5. 确认发布说明明确写明 **CI 预览、ad-hoc 签名、未公证、没有稳定的钥匙串信任身份**。测试版标为预发布；分发草稿前，下载并核验候选产物的实际字节。
+6. 最终审阅后手工公开发布草稿。工作流不会自动公开发布，也不会向 Android 商店提交应用。
 
-Only the release job receives the repository permission required to create a tag and draft release. CI preview mode is isolated from local certificate configuration and refuses Developer ID/notarization options. Production store credentials must never be added to this workflow.
+只有草稿发布任务获得创建标签和草稿所需的仓库写权限。CI 预览模式与本地证书配置隔离，拒绝 Developer ID 和公证选项。不得向该工作流添加渠道生产凭据。
 
-If draft creation or an asset upload is interrupted, use **Re-run failed jobs**
-on the original workflow run while `main` still points to the tested commit.
-This preserves that run's tested package bytes. A fresh dispatch or a rebuild
-can produce different archive bytes and will be rejected if a matching draft
-already exists. The workflow checks the
-existing lightweight tag, exact draft metadata and expected asset digests,
-downloads existing assets to verify their bytes, and uploads only missing files.
-It rejects a published release, a different tag target, conflicting metadata or
-asset bytes, and unexpected assets. It never replaces a tag or existing asset.
-If `main` has moved or a conflict remains, investigate and prepare a new version
-through the normal process.
+草稿创建或资产上传中断时，在 `main` 仍指向已测试提交的条件下，使用原工作流运行的 **Re-run failed jobs（重新运行失败任务）**，以保留该次测试产物的字节。重新触发或构建可能生成不同字节；已有匹配草稿时，这些不同产物会被拒绝。
 
-## Fixed-identity distribution
+工作流核对现有轻量标签、准确的草稿元数据和预期资产摘要，下载已有资产验证实际字节，再只上传缺失文件。已公开版本、标签目标不同、元数据或字节冲突及额外资产均会被拒绝。不会替换标签或已有资产。若 `main` 已变化或冲突仍在，应先调查，再按正常流程准备新版本。
 
-For use with production Keychain entries, prepare a separately configured fixed signing identity and validate it on the intended Macs. Developer ID signing and Apple notarization require the team's Apple developer credentials and explicit local/release configuration; they are not implied by a green preview job. See [Mac delivery](mac-cli-delivery.md).
+## 固定身份分发
 
-If candidate validation fails, fix the cause through a PR and build a new candidate. After publication, ship a new version rather than changing an existing artifact. CLI rollback switches an installed executable; it does not undo store writes or bypass local state-schema guards.
+使用生产钥匙串条目前，需另行配置固定签名身份，并在目标 Mac 上验证。Developer ID 签名和 Apple 公证需要团队开发者凭据及明确的本地或发布配置，预览检查通过不代表已完成这些步骤。详见 [Mac 安装与分发](mac-cli-delivery.md)。
+
+候选验收失败时，通过 PR 修复原因，再构建新候选。公开发布后应提供新版本，不应修改已有产物。CLI 回滚只切换已安装程序，不会撤销商店写入，也不会绕过本地状态结构检查。

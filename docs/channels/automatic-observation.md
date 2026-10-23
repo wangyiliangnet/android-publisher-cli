@@ -1,40 +1,40 @@
-# Automatic observation
+# 自动查询说明
 
-Run `release batch status --batch BATCH_ID --refresh` to collect available information in one command. Routine use does not require a browser login or manual status entry. A specific unresolved account, protocol, or version-association problem may still need a vendor-console check.
+运行 `release batch status --batch BATCH_ID --refresh`，一次收集可用信息。日常使用无需先登录浏览器或手工录入状态；只有具体的账号、协议或版本关联问题无法解决时，才可能需要到渠道后台核实。
 
-The CLI keeps verified target review/availability separate from `channel_context`: current channel facts, explicitly labeled inference, and information that cannot be associated with the frozen release. Context never resolves an unknown write and never increases verified approved/live counts.
+CLI 将已核实的目标审核和上架状态与 `channel_context` 分开。后者包含当前渠道信息、明确标注的推测，以及无法关联到冻结版本的信息。这些参考信息不能解决未知写入，也不会增加已核实的审核通过或上架数量。
 
-## Xiaomi
+## 小米
 
-The CLI automatically queries the package details endpoint for the account's returned version name/code. Xiaomi documents that endpoint as a package query, not a version-bound review-result or store-availability query. [Official API guide](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=1134).
+CLI 自动查询包详情接口，读取该账号返回的版本名和版本号。小米文档将其定义为包查询，不是与版本绑定的审核结果或商店上架查询。参见[官方 API 指南](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=1134)。
 
-Only after a matching local submission receipt exists does the CLI show this comparison as an **inference**:
+仅在存在匹配的本地提交回执后，CLI 才将以下比较结果显示为**推测**：
 
-| Returned API version code | Displayed inference | Meaning |
+| API 返回的版本号 | 显示的推测 | 含义 |
 | --- | --- | --- |
-| Lower than the frozen target | In review — inferred | The queried version has not caught up to the submitted target |
-| Equal to the frozen target | Approved — inferred | The API now reports the target version; review and public availability are still not verified |
-| Higher than the frozen target | Unknown | The query may describe a later version |
-| No confirmed local submission | Unknown | A comparison cannot establish submission or review |
+| 低于冻结目标 | 审核中（推测） | 查询到的版本尚未达到已提交目标 |
+| 等于冻结目标 | 审核通过（推测） | API 已返回目标版本，但仍未核实审核和公开上架状态 |
+| 高于冻结目标 | 未知 | 查询结果可能属于后续版本 |
+| 没有已确认的本地提交 | 未知 | 不能通过版本比较确认已提交或审核状态 |
 
-The output retains the exact inference basis and `association: unconfirmed`. A failed query does not produce a fresh inference. Xiaomi target `review_state` and `availability_state` remain unknown where the API cannot prove them.
+输出保留准确的推测依据及 `association: unconfirmed`。查询失败时不会生成新的推测。API 无法证明目标状态时，小米的 `review_state` 和 `availability_state` 仍为未知。
 
-## Tencent MyApp (应用宝)
+## 应用宝
 
-The CLI queries the developer audit endpoint for the current audit slot and reads the package's official public detail page for its displayed store version. Returned audit statuses include in review, rejected, approved, or withdrawn; an unknown code stays unknown. A rejected result may include a bounded, sanitized explanation. API reference: [MyApp developer guide](https://wiki.open.qq.com/index.html#/guide/develop?id=4015262492); public source: [MyApp store](https://sj.qq.com/).
+CLI 查询开发者审核接口中的当前审核信息，同时读取该包官方公开详情页显示的商店版本。返回的审核状态包括审核中、驳回、通过和撤回；未知状态码保持未知。驳回结果可能包含长度受限、经过脱敏的说明。API 参考：[应用宝开发者指南](https://wiki.open.qq.com/index.html#/guide/develop?id=4015262492)；公开来源：[应用宝商店](https://sj.qq.com/)。
 
-These observations carry **“not confirmed to belong to this version”**. An unversioned audit slot may refer to another submission. A public store version is useful package-level information but does not automatically bind the audit result to this frozen release. Even matching version text is not sufficient to relax the target's verified state or write barriers.
+这些观测均注明**“未确认属于本次版本”**。没有版本标识的审核信息可能属于另一次提交。公开商店版本是有用的包级信息，但不会自动将审核结果绑定到本次冻结版本。即使版本文本一致，也不足以放宽目标的已核实状态或写入屏障。
 
-The public-page request uses no credential, cookie, or browser session. It uses HTTPS, an exact allowed host and package path, bounded time/body size, no redirects, and structured data that must match the requested package. An unexpected page shape fails closed rather than extracting an arbitrary version number from nearby text.
+公开页面请求不使用凭据、Cookie 或浏览器会话。请求使用 HTTPS，严格限制主机和包路径、时限及响应大小，禁止重定向，并要求结构化数据与所请求的包匹配。页面结构不符时按失败处理，不从附近文本随意提取版本号。
 
-## Partial failures and cached data
+## 部分失败与缓存
 
-API and public-store health are independent. An API failure can coexist with a successful public version query; a page failure can coexist with a useful audit result. The aggregate query result then reports partial health. Public information does not conceal an authentication failure.
+API 和公开商店的健康状态分别记录。API 失败时，公开版本查询仍可能成功；页面失败时，审核结果仍可能有用。此时整体查询标为部分健康，公开信息不会掩盖鉴权失败。
 
-Retained facts have their original collection time and an explicit cached label. They are distinct from the latest query's source health. Cached context does not become fresh because a later query failed. Disputed verified evidence remains disputed after context-only queries.
+保留的事实带有原始采集时间和明确的缓存标记，与最新查询的来源健康状态分开。后续查询失败不会使缓存变成新数据。只有参考信息的查询也不会消除已核实证据中的争议。
 
-Reports preserve these distinctions. Treat inference and unassociated facts as operational context, and seek console evidence only for the concrete question the automatic sources cannot answer.
+报告保留这些区分。推测和未关联的信息可供操作参考；仅在自动来源无法回答具体问题时，再到后台补充证据。
 
-## Implementation boundary
+## 实现边界
 
-The API-first discovery approach was informed by the general workflow of [apkgo](https://github.com/KevinGong2013/apkgo). Protocols and parsers here are independently implemented. apkgo's source has separate license terms; this project's MIT license does not relicense that source or vendor documentation. See [protocol evidence](protocol-evidence.md).
+优先通过 API 自动查询的思路参考了 [apkgo](https://github.com/KevinGong2013/apkgo) 的一般流程，协议和解析器均独立实现。apkgo 源码有单独的许可条款；本项目 MIT 许可证不适用于该源码或渠道文档。详见[协议验证依据](protocol-evidence.md)。

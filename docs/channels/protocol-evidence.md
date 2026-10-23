@@ -1,39 +1,39 @@
-# Protocol capabilities and evidence
+# 渠道协议能力与验证依据
 
-This is an implementation evidence map, not a certification of a developer account. The public repository contains synthetic fixtures and tests, not live account evidence. `release protocols` prints the offline capability catalog; `protocol_mock_verified` must not be read as `account_verified` or `live_verified`.
+本文列出实现及验证依据，不是开发者账号认证。公开仓库包含合成测试数据和测试，不包含真实账号证据。`release protocols` 输出离线能力目录；`protocol_mock_verified` 不等于 `account_verified` 或 `live_verified`。
 
-## Implemented scope
+## 已实现范围
 
-| Channel | Update path | Important boundary |
+| 渠道 | 更新路径 | 主要限制 |
 | --- | --- | --- |
-| Huawei AppGallery | Authorize upload, upload APK, bind, update allowed metadata, submit | Asynchronous package processing; upload origin must satisfy the controlled host policy; no general lost-response retry proof |
-| HONOR | Authorize upload, upload APK, bind, update allowed metadata, submit | Account-level API credentials; release identity is needed for version-specific audit evidence; undocumented clear/retry behavior stays blocked |
-| Xiaomi | Signed package query and push | Required icon/public certificate and structured test-account data where applicable; review is inference only; no verified API review/live result |
-| OPPO | Authorize upload, upload APK, submit | One-time upload authorization; exact approved intent and preflight; undocumented authorization lifetime or lost response must not trigger a blind retry |
-| vivo | Upload APK, submit | Single-APK update scope; separate 32/64-bit package orchestration is deferred; ambiguous protocol choices need account evidence |
-| Tencent MyApp | Authorize upload, upload APK, submit | Main developer account scope; an unversioned audit slot is not target proof; public-page version is independent context |
+| 华为应用市场 | 申请上传授权、上传 APK、绑定、更新允许的元数据、提审 | 包处理为异步；上传来源必须满足受控主机策略；没有通用的响应丢失重试依据 |
+| 荣耀 | 申请上传授权、上传 APK、绑定、更新允许的元数据、提审 | 使用账号级 API 凭据；取得特定版本审核证据需要发布标识；文档未说明的清理或重试行为保持阻塞 |
+| 小米 | 签名查询包信息并推送 | 需要图标和公钥证书，并按适用条件提供结构化测试账号数据；审核仅能推测，API 无法核实审核或上架结果 |
+| OPPO | 申请上传授权、上传 APK、提审 | 上传授权一次性使用；需匹配准确的批准意图和预检；授权有效期不明或响应丢失时不得盲目重试 |
+| vivo | 上传 APK、提审 | 仅支持单 APK 更新；32/64 位双包编排暂缓；有歧义的协议选择需账号验证依据 |
+| 应用宝 | 申请上传授权、上传 APK、提审 | 使用主开发者账号；未绑定版本的审核信息不能证明本次目标状态；公开页版本仅作独立参考 |
 
-Production submissions currently support an update with the `after_approval` policy: publish immediately after vendor approval. This is not a universal first-listing or arbitrary metadata-management client. Inspect the CLI's exact preflight and approved plan for the application in use.
+生产提交目前支持采用 `after_approval` 规则的版本更新，即渠道审核通过后立即发布。工具不覆盖通用首次上架或任意元数据管理。请检查当前应用的准确预检结果和已批准计划。
 
-Tests cover synthetic success/error payloads, large identifiers, malformed/missing fields, upload grant restrictions, account coordination, durable receipts, and uncertain writes. Tests do not establish vendor access, approval timing, public availability, copyright compliance, or current service permission for an operator.
+测试覆盖合成成功及错误响应、大整数标识、格式错误或缺失字段、上传授权限制、账号协调、持久化回执和结果不确定的写入。测试不证明操作者已获得渠道访问权限，也不证明审核时间、公开上架、版权合规或当前服务权限。
 
-## Official reference entry points
+## 官方文档入口
 
-References were reviewed for the public documentation on 2026-10-23. Vendor pages can move, require login, or render dynamically. A linked entry point is not a claim that every page was retrievable or that every undocumented behavior has been validated.
+公开文档所列参考资料的复核日期为 2026-10-23。渠道页面可能迁移、要求登录或动态渲染。提供入口链接不代表每个页面均可读取，也不代表所有未公开行为都已验证。
 
-| Vendor | Primary source | Use and limits |
+| 渠道 | 官方来源 | 用途与限制 |
 | --- | --- | --- |
-| Huawei | [AppGallery Connect API introduction](https://developer.huawei.com/consumer/en/doc/AppGallery-connect-Guides/agcapi-overview-0000001158245083) | Publishing and upload API families; consult the current method reference before protocol changes |
-| HONOR | [API package-upload guide](https://developer.honor.com/cn/doc/guides/101359) | OAuth, application identity, upload and publishing contracts; dynamically rendered pages may require the developer portal |
-| Xiaomi | [Automatic publishing API guide](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=1134) | Signed query/push contracts; the query returns package version information rather than an explicit review result |
-| OPPO | [Developer service center](https://open.oppomobile.com/) | Locate the current application publishing API documentation in the official portal; do not infer a contract from unrelated API products |
-| vivo | [API access guide](https://developer.vivo.com/doc/detail?id=73) | API access and publishing families; use the matching platform/region documentation for an account |
-| Tencent MyApp | [Developer API guide](https://wiki.open.qq.com/index.html#/guide/develop?id=4015262492), [public store](https://sj.qq.com/) | Developer audit query and public package context; document rendering and public-page structures may change independently |
+| 华为 | [AppGallery Connect API 简介](https://developer.huawei.com/consumer/en/doc/AppGallery-connect-Guides/agcapi-overview-0000001158245083) | 发布和上传 API；修改协议前查阅当前具体接口文档 |
+| 荣耀 | [API 包上传指南](https://developer.honor.com/cn/doc/guides/101359) | OAuth、应用标识、上传和发布约定；动态页面可能需进入开发者平台 |
+| 小米 | [自动发布 API 指南](https://dev.mi.com/xiaomihyperos/documentation/detail?pId=1134) | 签名查询与推送约定；查询返回包版本信息，没有明确的审核结果 |
+| OPPO | [开发者服务中心](https://open.oppomobile.com/) | 在官方平台查找当前应用发布 API 文档，不得从无关 API 产品推断协议 |
+| vivo | [API 接入指南](https://developer.vivo.com/doc/detail?id=73) | API 接入与发布；使用与账号平台、地区相符的文档 |
+| 应用宝 | [开发者 API 指南](https://wiki.open.qq.com/index.html#/guide/develop?id=4015262492)、[公开商店](https://sj.qq.com/) | 开发者审核查询和公开包信息；文档渲染与公开页结构可能分别变化 |
 
-For adapters changed in a pull request, record the exact official method reference, fields used, source access limitations, synthetic test cases, and any unresolved account-validation question. Preserve unknown states for missing, unrecognized, or older-version evidence.
+PR 修改适配器时，记录准确的官方接口文档、使用字段、来源访问限制、合成测试用例，以及仍待账号核验的问题。缺失、无法识别或属于旧版本的证据应保持未知状态。
 
-## Third-party ideas and licensing
+## 第三方思路与许可
 
-[apkgo](https://github.com/KevinGong2013/apkgo) is a workflow reference for automatic discovery. Its PolyForm Noncommercial license is not the license of this repository. The protocol code here is independently implemented; do not copy or translate apkgo source under this project's MIT license without separate permission. Vendor documentation and service access retain the vendors' terms.
+[apkgo](https://github.com/KevinGong2013/apkgo) 为自动查询流程提供参考。它采用的 PolyForm Noncommercial 许可证与本仓库不同。这里的协议代码独立实现；未经另行授权，不得复制或翻译 apkgo 源码并按本项目 MIT 许可证使用。渠道文档和服务仍适用各自的条款。
 
-Go, npm, and other dependencies retain their own licenses and notices. Distribution packaging collects applicable Go dependency notices. A dependency update must also review its license and the runtime/package contents it adds.
+Go、npm 和其他依赖保留各自的许可证及声明。分发打包会收集适用的 Go 依赖声明；更新依赖时，也需检查其许可证，以及新增的运行环境和包内容。

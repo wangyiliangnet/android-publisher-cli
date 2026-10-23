@@ -1,9 +1,9 @@
-Describe the problem and the resulting behavior.
+说明要解决的问题，以及变更后的行为。
 
-Validation performed:
+已完成的验证：
 
-- [ ] `make check` or explain which relevant checks were run.
-- [ ] Add focused recovery/protocol tests when changing those behaviors.
-- [ ] Keep examples, fixtures and screenshots synthetic; include no account material.
+- [ ] 已运行 `make check`，或说明实际执行了哪些相关检查。
+- [ ] 修改恢复或协议行为时，已补充专项测试。
+- [ ] 示例、测试数据和截图均为合成内容，不含真实账号材料。
 
-Link related issues and note any remaining limitations.
+关联相关 issue，并说明仍存在的限制。
