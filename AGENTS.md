@@ -1,47 +1,25 @@
-# Project instructions
+# 项目协作规则
 
-## Scope and evidence
+## 范围与验证依据
 
-This repository contains the public macOS Android publishing CLI. Read README.md
-for commands and docs/architecture.md for the execution model. Before changing
-channel protocols, read docs/channels/protocol-evidence.md; distinguish an
-implemented protocol, synthetic test evidence and live account verification.
-Use generic examples and synthetic fixtures in all tracked files and reports.
+本仓库维护公开的 macOS Android 发布 CLI。命令入口见 README.md，执行模型见 docs/architecture.md。修改渠道协议前，先读 docs/channels/protocol-evidence.md，区分协议已实现、合成测试通过和真实账号已验证。所有跟踪文件和报告都使用通用示例与合成测试数据。
 
-## Publishing invariants
+## 发布约束
 
-- Freeze intent and artifact before business writes. Persist each operation
-  intent before its request and its verified receipt immediately afterward.
-- Keep execution, review, availability and query health separate. Unassociated
-  facts and inferences do not confirm target state or resolve disputed evidence.
-- Keep plan offline. Preflight, observations and reconciliation read publishing
-  data; route token lifecycle effects through account coordination.
-- An unresolved write blocks conflicting writes for the same channel, account
-  and application. Resume only after reconciliation or verified idempotency.
-- Real store changes require authorization covering application, artifact and
-  publishing scope. Initialization, tests and CI never authorize a submission.
+- 业务写入前冻结意图和产物；每次请求前持久化操作意图，取得可验证的回执后立即保存。
+- 分别记录执行、审核、上架和查询健康状态。未关联的信息和推测不能确认目标状态，也不能消除证据争议。
+- plan 保持离线。预检、观测和核对只读取发布数据；令牌生命周期操作通过账号协调层执行。
+- 同一渠道、账号和应用存在结果未决的写入时，阻止冲突写入。只有核对结果或已验证的协议幂等性允许继续执行。
+- 真实商店变更必须获得覆盖应用、产物和发布范围的授权。初始化、测试和 CI 均不构成提审授权。
 
-## Credentials and runtime state
+## 凭据与运行状态
 
-Resolve secrets through local Keychain references. Keep real account IDs,
-credentials, signing keys, APKs, cookies, signed URLs and sensitive responses out
-of Git, issues, agent prompts, build artifacts and normal logs. Runtime state is
-under ~/Library/Application Support/AndroidPublisherCLI/; installation files are
-under ~/.local/android-publisher-cli/. CI uses temporary synthetic credentials and
-independent browser profiles, without store accounts or persistent user data.
-Implement vendor protocols independently and retain official source references;
-resolve third-party licensing before reusing code.
+通过本机钥匙串引用读取密钥。真实账号标识、凭据、签名私钥、APK、Cookie、签名 URL 和敏感响应不得进入 Git、issue、agent 提示词、构建产物或常规日志。运行状态保存在 ~/Library/Application Support/AndroidPublisherCLI/，安装文件保存在 ~/.local/android-publisher-cli/。CI 使用临时合成凭据和独立浏览器配置，不使用渠道账号或持久化用户数据。
 
-## Validation and contributions
+独立实现渠道协议并保留官方来源引用；复用第三方代码前先确认许可条件。
 
-Run make check for Go changes and focused tests for changed behavior. Set both
-GO and GOFMT when using a toolchain outside PATH. Recovery changes need fault
-injection and real subprocess termination coverage. Packaging changes need
-installation, upgrade, rollback, checksum and path-safety smoke checks.
+## 验证与贡献
 
-Read CONTRIBUTING.md before opening a PR and docs/release-process.md before
-changing workflows, tags or releases. Use codex/<topic> branches, PRs into main
-and the required CI check; never bypass a failed check. Keep signing and channel
-submission separate from CI preview packaging. When subagents are authorized,
-give bounded paths/questions; reviewers are read-only, and the coordinator
-integrates fixes and records unresolved findings.
+修改 Go 代码后运行 make check，并针对变更行为执行专项测试。使用 PATH 之外的工具链时，同时指定 GO 和 GOFMT。恢复逻辑变更需覆盖故障注入和真实子进程终止；打包变更需验收安装、升级、回滚、校验和及路径安全。
+
+提交 PR 前先读 CONTRIBUTING.md；修改工作流、标签或发布流程前先读 docs/release-process.md。使用 codex/<topic> 分支，通过面向 main 的 PR 和必需 CI 合并，不得绕过失败检查。正式签名和渠道提交与 CI 预览打包分开处理。获准使用 subagents 时，明确分配路径和问题范围；审查者默认只读，由协调者整合修订并记录未解决的问题。

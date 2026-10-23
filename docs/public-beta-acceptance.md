@@ -1,98 +1,43 @@
-# Public beta acceptance
+# 公开测试版验收记录
 
-This record covers the public CLI, using synthetic inputs on Apple Silicon macOS.
-It does not certify a store account, application, production submission, or Apple
-notarization.
+本记录针对公开 CLI，使用 Apple Silicon macOS 和合成输入验收，不代表已核实渠道账号、应用或生产提交，也不代表完成 Apple 公证。
 
-## Local acceptance
+## 本地验收
 
-- Complete `make check` with pinned Go and Node.js: formatting, vet, Go race,
-  real Chromium, temporary native Keychain, interrupted subprocess recovery,
-  and a build passed.
-- Mandatory Android integration passed with an isolated Android SDK, real
-  Build Tools, a JDK, and generated test APKs and signing keys.
-- Two-version CI preview packaging passed installation, upgrade, rollback,
-  repeated installation, complete-version collision, checksum corruption,
-  unexpected files, symlinks, offline documentation, and uninstall checks.
-- Separate runtime, Keychain service, signing identifier, and installation
-  namespaces were checked. Tests and preview builds use no production accounts.
-- Workflow lint, release version guards, script guards, privacy regression
-  tests, exact secret-scanner fixture allowances, and public-history scans are
-  required before publication.
+- 使用固定版本的 Go 和 Node.js 完成 `make check`：格式、vet、Go 竞态、真实 Chromium、临时原生钥匙串、中断子进程恢复和构建均通过。
+- 强制 Android 集成测试通过，使用独立 Android SDK、真实 Build Tools、JDK，以及生成的测试 APK 和签名密钥。
+- 双版本 CI 预览打包通过安装、升级、回滚、重复安装、同版本完整内容冲突、校验和损坏、额外文件、符号链接、离线文档和卸载检查。
+- 已检查运行状态、钥匙串服务、签名标识和安装路径各自独立的命名空间。测试和预览构建不使用生产账号。
+- 公开发布前必须通过工作流检查、发布版本检查、脚本检查、隐私回归测试、密钥扫描器精确测试例外检查及公开历史扫描。
 
-## Independent review
+## 独立审查
 
-Read-only reviewers covered public-data and license boundaries, CI and repository
-rules, and Mac delivery. Material findings were:
+只读审查覆盖公开数据与许可边界、CI 和仓库规则，以及 Mac 交付。主要发现如下：
 
-1. The quickstart PATH differed from the installation default. The example now
-   uses `~/.local/android-publisher-cli/bin`.
-2. Public-data scanning omitted commit messages and annotated tag metadata.
-   The gate now inspects reachable Git metadata as well as current and historical
-   files, with regression tests for privacy and credential patterns.
-3. A successful tag followed by interrupted draft creation could strand a
-   version. Recovery now verifies the exact tag, draft metadata, and existing
-   asset bytes, then uploads only missing assets.
-4. Git replacement refs could conceal original historical content. The gate
-   rejects replacement refs and forces raw object inspection in every Git and
-   Gitleaks subprocess.
-5. A real dependency-update commit exposed an overly strict privacy check on the
-   official bot's final sign-off. Only the exact official bot identity and trailer
-   receive a privacy exception; raw secret-scanner input stays unchanged. Source,
-   tag/ref text, other identities and neighboring private text remain blocked.
+1. 快速入门中的 PATH 与默认安装路径不同，示例现已改为 `~/.local/android-publisher-cli/bin`。
+2. 公开信息扫描未覆盖提交消息和附注标签元数据。现在除当前及历史文件外，还检查可达 Git 元数据，并以回归测试覆盖隐私和凭据模式。
+3. 标签已创建、草稿创建却中断时，可能使该版本无法继续。恢复流程现会检查准确的标签、草稿元数据和已有资产字节，只上传缺失资产。
+4. Git 替换引用可能隐藏原始历史内容。检查现在拒绝替换引用，并在每个 Git 和 Gitleaks 子进程中强制读取原始对象。
+5. 一次真实依赖更新暴露出隐私检查对官方机器人末尾签名行限制过严。现在只为准确的官方机器人身份和签名行提供隐私例外，交给密钥扫描器的原始输入不变。源码、标签与引用文本、其他身份和邻近私有文本仍受检查。
 
-All five findings were corrected and rechecked by the original independent
-reviewers, with no remaining P0–P2 findings in their assigned scopes. Eighteen
-privacy regression tests, thirteen draft-recovery fault tests, workflow lint,
-the complete source/history/metadata scan and final package smoke checks passed.
-Later hosted acceptance evidence is recorded through a normal pull request.
+五项问题均已修复，并由原独立审查者复核，分配范围内没有遗留 P0–P2 问题。18 项隐私回归测试、13 项草稿恢复故障测试、工作流检查、完整源码与历史及元数据扫描、最终安装包冒烟测试均通过。后续云端验收证据通过正常 PR 记录。
 
-## Cloud and release acceptance
+## 云端与发布验收
 
-Hosted acceptance uses the standard Apple Silicon runner, including the complete
-suite and two-version installation/recovery checks. Normal checks upload no
-release artifact. The clean public repository records its hosted results in
-[CI history](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml).
+云端验收使用标准 Apple Silicon 运行器，包含完整测试和双版本安装恢复检查。常规检查不上传发布产物。独立建立的公开仓库将云端结果记录在 [CI 历史](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml)中。
 
-An independent read-only remote review confirmed that both versioned rulesets
-are active without bypass actors and actually apply to `main` and `v*` tags.
-Only squash merging is enabled. Actions require full commit pins and GitHub-owned
-actions, default to read-only permissions, and cannot approve pull requests.
-Private vulnerability reporting, secret scanning, and push protection are on.
+独立只读远端审查确认，两个已纳入版本管理的规则集均启用、没有可绕过规则的角色，并实际约束 `main` 和 `v*` 标签。只允许 squash 合并；Actions 要求固定完整提交并限用 GitHub 官方 Actions，默认只读，不能批准 PR。私密漏洞报告、密钥扫描和推送保护均已开启。
 
-The acceptance pull request exercises the required-check merge gate. Its checks
-and merge event on GitHub are the live result. Each preview release run records
-its current-main validation, full check, package acceptance, and draft writer
-as separate jobs in [Actions](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/release.yml).
-The first preview remains an ad-hoc signed, unnotarized draft; fixed-identity
-distribution is a separate capability.
+验收 PR 用于验证必需检查对合并的约束，GitHub 上的检查与合并事件是实际结果。每次预览发布运行都会在 [Actions](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/release.yml) 中分别记录当前 main 验证、完整检查、安装包验收和草稿创建任务。首个预览仍是 ad-hoc 签名、未公证的草稿；固定身份分发属于单独能力。
 
-## Downloaded artifact review
+## 下载产物复核
 
-The first draft's actual hosted artifact passed checksum, signature, architecture,
-clean source-commit, manifest, license, and installation/recovery checks on a Mac.
-A final independent review found a P3 offline link defect in the packaged
-changelog. The builder now rewrites that link, and package acceptance checks all
-root Markdown documents. The expanded check rejects the original archive. This
-correction uses a new `0.1.0-beta.2` candidate without replacing the earlier tag
-or package bytes.
+首个草稿的实际云端产物已在 Mac 上通过校验和、签名、架构、干净源码提交、清单、许可证及安装恢复检查。最终独立审查发现，安装包更新记录有一处 P3 离线链接问题。打包工具现会改写该链接，安装包验收也会检查根目录全部 Markdown 文档。扩展后的检查能够拒绝原压缩包。修复使用新的 `0.1.0-beta.2` 候选，不替换先前标签或安装包字节。
 
-## Clean public bootstrap
+## 脱敏后的公开仓库基线
 
-The public repository starts from one reviewed source snapshot with noreply
-metadata. Contributor web-identity privacy is a prerequisite before opening a
-pull request. Cloud checks and a draft preview are repeated against this clean
-public baseline. Earlier evaluation artifacts are retained privately; no earlier
-Git objects are imported into this repository.
+公开仓库从一份已审查、使用 noreply 元数据的源码快照开始。创建 PR 前，贡献者必须先配置网页提交身份隐私。云端检查和预览草稿会针对该公开基线重新执行。较早的评估产物私下保留，不将先前 Git 对象导入此仓库。
 
-Independent review confirmed that the fresh public baseline has one noreply root
-commit, no earlier Git objects, and only documentation differences from the
-reviewed source. Anonymous checks cannot resolve the earlier test-merge object
-through either the public repository or its private archive. Contributor account
-privacy was checked before opening the clean repository's acceptance PR.
+独立审查确认，新公开基线只有一个 noreply 根提交，不含先前 Git 对象，与已审源码的差异仅为文档。匿名查询无法通过公开仓库或私有归档读取先前的测试合并对象。创建新仓库的验收 PR 前，已检查贡献者账号隐私设置。
 
-A hosted cold Chromium launch/capture exceeded the acceptance fixture's former
-10-second request budget. The fixture now uses the protocol's existing maximum
-of 30 seconds. Runtime behavior and protocol limits are unchanged, while dedicated
-deadline and cancellation tests keep their own short bounds. Checks are not
-retried automatically or skipped after a timeout.
+云端一次 Chromium 冷启动和采集超过了验收测试数据原先的 10 秒请求时限。现在使用协议已有的 30 秒上限。运行行为和协议限制不变，专门的截止时间与取消测试仍使用各自较短的时限。超时后不会自动重试或跳过检查。

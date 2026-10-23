@@ -1,19 +1,19 @@
-# Security policy
+# 安全政策
 
-This is beta software that can perform store-side publishing writes. Use the latest beta and validate it with a non-production application before adopting it for a production account. No long-term support branch or guaranteed response deadline is currently offered.
+本工具仍处于测试阶段，能够在渠道端执行发布写入。请使用最新测试版，并先通过非生产应用验证，再用于生产账号。目前不提供长期支持分支，也不承诺固定的响应期限。
 
-## Report a vulnerability privately
+## 私下报告漏洞
 
-Use GitHub's **Security → Report a vulnerability** for this repository when available. If the private reporting form is unavailable, open an issue asking for a private contact method and include no exploit details, account identifiers, or sensitive files.
+优先使用本仓库的 GitHub **Security → Report a vulnerability（报告漏洞）**。若私密报告表单不可用，可创建 issue 询问私下联系方式，但不要附带利用细节、账号标识或敏感文件。
 
-Describe the affected version or commit, a minimal synthetic reproduction, impact, and proposed mitigation. Do not attach API secrets, private keys, certificates with private keys, cookies, tokens, signed URLs, real APKs, raw vendor responses, or a publishing database. Review diagnostic output before sharing it.
+请说明受影响的版本或提交、使用合成数据的最小复现步骤、影响和建议的缓解措施。不要附带 API 密钥、私钥、含私钥的证书、Cookie、令牌、签名 URL、真实 APK、渠道原始响应或发布数据库。分享前先检查诊断输出。
 
-## Security boundaries
+## 安全边界
 
-- Production credentials are resolved locally through macOS Keychain references. Never store them in repository files or GitHub Actions secrets for this project's CI.
-- Publishing state, baselines, artifacts, and evidence remain in private local storage. Reports omit credential values and raw responses but can still contain application names, notes, versions, and identifiers; review them before sharing.
-- Production writes require an explicitly approved immutable intent and preflight. An unresolved write remains blocked until reconciliation or verified protocol idempotency resolves it.
-- Automatic or public-store context is useful information, not proof that a particular release was reviewed or is live.
-- CI uses synthetic data and temporary test identities. A green build does not prove store permissions, Apple notarization, or production readiness.
+- 通过 macOS 钥匙串引用在本机读取生产凭据。不得将其存入仓库文件，或添加到本项目 CI 的 GitHub Actions secrets。
+- 发布状态、基准、产物和证据保存在本机私有存储中。报告虽不含凭据值和原始响应，仍可能包含应用名、更新说明、版本和标识，分享前需检查。
+- 生产写入需要明确批准的不可变意图和预检。结果未决的写入保持阻塞，直到核对或已验证的协议幂等性将其解决。
+- 自动查询或公开商店信息可供操作参考，但不能证明某次发布已经通过审核或上架。
+- CI 使用合成数据和临时测试身份。构建通过不代表已核实渠道权限、完成 Apple 公证或具备生产使用条件。
 
-If a credential may have leaked, revoke or rotate it at the vendor first, then replace the local Keychain entry. Removing a Git file alone does not revoke a secret or remove its history.
+凭据可能泄露时，先在渠道端吊销或轮换，再替换本机钥匙串条目。仅删除 Git 文件不会使密钥失效，也不会清除历史记录。

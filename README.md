@@ -1,23 +1,23 @@
-# Android Publisher CLI
+# Android 发布工具（Android Publisher CLI）
 
 [![CI](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml)
 
-A local publishing CLI for Apple Silicon Macs, covering Huawei AppGallery, HONOR, Xiaomi, OPPO, vivo, and Tencent MyApp (应用宝).
+在 Apple Silicon Mac 上运行的本地发布工具，支持华为应用市场、荣耀、小米、OPPO、vivo 和应用宝。
 
-Prepare signed APKs, review one immutable publishing plan, submit selected channels, and inspect release history from the same Mac. Credentials stay in macOS Keychain. The executable is named `release`.
+在同一台 Mac 上准备已签名的 APK、审阅不可变的发布计划、向选定渠道提交更新，并查看发布历史。凭据保存在 macOS 钥匙串中，程序名为 `release`。
 
-**Status: public beta.** Protocols and recovery behavior have synthetic acceptance tests. This repository does not certify any developer account, application, store permission, or live release. Start with a test application and review each publishing plan before allowing business writes.
+**当前为公开测试版。** 协议与恢复行为已通过合成数据验收；这不代表已核实任何开发者账号、应用、渠道权限或真实发布。请先使用测试应用，并在允许业务写入前审阅每份发布计划。
 
-## Start here
+## 从这里开始
 
-- [中文同事使用手册](docs/colleague-quickstart.md)
-- [Daily workflow and recovery](docs/daily-cli-workflow.md)
-- [Mac installation and distribution](docs/mac-cli-delivery.md)
-- [Channel capabilities and evidence](docs/channels/protocol-evidence.md)
-- [Architecture](docs/architecture.md), [roadmap](docs/execution-plan.md), and [contributing](CONTRIBUTING.md)
-- [Public beta acceptance](docs/public-beta-acceptance.md)
+- [Mac 同事使用手册](docs/colleague-quickstart.md)
+- [日常操作与恢复](docs/daily-cli-workflow.md)
+- [Mac 安装与分发](docs/mac-cli-delivery.md)
+- [渠道能力与验证依据](docs/channels/protocol-evidence.md)
+- [架构](docs/architecture.md)、[路线图](docs/execution-plan.md)和[贡献指南](CONTRIBUTING.md)
+- [公开测试版验收记录](docs/public-beta-acceptance.md)
 
-An Apple Silicon Mac, Android SDK Build Tools, and a compatible JDK are needed to inspect real APKs. A packaged CLI needs no Go or Node.js installation for API publishing. The browser observer is currently a simulation and acceptance-test facility, not a production login prerequisite.
+检查真实 APK 需要 Apple Silicon Mac、Android SDK Build Tools 和兼容的 JDK。使用安装包执行 API 发布命令时，无需安装 Go 或 Node.js。浏览器观测器目前用于模拟和验收，日常发布无需先登录浏览器。
 
 ```sh
 release version --json
@@ -25,34 +25,34 @@ release doctor
 release setup --project demo --apk "/absolute/path/trusted.apk"
 ```
 
-The setup wizard uses Chinese prompts and saves public account identifiers and Keychain entry names. Import secrets separately using hidden terminal input or a private credential file. Never paste credentials into issues, pull requests, or command-line arguments.
+配置向导使用中文提示，只保存公开的账号标识和钥匙串条目名称。密钥需另行通过终端隐藏输入或私有凭据文件导入。不要把凭据粘贴到 issue、PR 或命令行参数中。
 
-For each release, prepare explicit APKs and notes, run the read-only preflight, and review a saved approval file. Submission requires the exact reviewed approval digest. [The workflow guide](docs/daily-cli-workflow.md) includes the full sequence.
+每次发布都需明确提供 APK 和更新说明，完成只读预检，再审阅保存的批准文件。提交时必须使用该次审阅的准确批准摘要。完整步骤见[日常操作指南](docs/daily-cli-workflow.md)。
 
-## What it preserves
+## 发布过程的约束
 
-- APK, signer, notes, target, and publication policy are frozen before publishing writes.
-- Operation intent is saved before a request; a verified receipt is saved immediately afterward.
-- Lost responses remain unresolved until reconciliation supplies adequate evidence. Restarting does not justify sending the write again.
-- Execution, review, store availability, and query health are separate states. “Accepted” does not mean “approved” or “live.”
-- Xiaomi review inference and unassociated MyApp facts are labeled separately and never count as verified target approval or availability.
-- Cached history and report export work offline. Routine status refresh uses APIs and MyApp's public store page without requiring browser login or manual status entry.
+- 业务写入前，冻结 APK、签名、更新说明、目标和发布规则。
+- 请求发出前保存操作意图，取得可验证的回执后立即保存。
+- 响应丢失时，操作结果保持未决，直到核对取得足够依据。重启程序不能作为再次写入的理由。
+- 执行、审核、上架和查询健康状态分别记录。“已受理”不等于“审核通过”或“已上架”。
+- 小米的审核推测、应用宝尚未关联到本次版本的信息单独标注，不计入已核实的审核通过或上架数量。
+- 缓存历史和报告可离线读取。日常状态刷新使用 API 和应用宝公开商店页面，无需先登录浏览器或手工录入状态。
 
-Local state lives under `~/Library/Application Support/AndroidPublisherCLI/`; credential services use `io.github.wangyiliangnet.android-publisher-cli.v1`. Runtime files, signed URLs, credentials, and APKs do not belong in Git.
+本地状态保存在 `~/Library/Application Support/AndroidPublisherCLI/`；凭据服务使用 `io.github.wangyiliangnet.android-publisher-cli.v1`。运行文件、签名 URL、凭据和 APK 不应提交到 Git。
 
-## Build and validate
+## 构建与验证
 
-Use the exact Go and Node.js versions in [`.go-version`](.go-version) and [`.node-version`](.node-version), plus the npm version in [the browser package](browser/package.json).
+使用 [`.go-version`](.go-version) 和 [`.node-version`](.node-version) 指定的 Go、Node.js 版本，以及[浏览器依赖配置](browser/package.json)中的 npm 版本。
 
 ```sh
 make browser-install
 PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check
 ```
 
-`make check` runs formatting, static checks, race-enabled Go tests, browser acceptance tests, and a local build. Android signature integration tests need the SDK and JDK. CI supplies them and requires these checks rather than silently skipping them. Tests use synthetic inputs and temporary credentials, never production store accounts or real application APKs.
+`make check` 包括格式检查、静态检查、Go 竞态测试、浏览器验收和本机构建。Android 签名集成测试需要 SDK 和 JDK；CI 会提供这些环境，并强制执行测试，缺少依赖时不会静默跳过。测试使用合成输入和临时凭据，不使用渠道生产账号或真实应用 APK。
 
-See [the release process](docs/release-process.md) for branch protection, required CI, version tags, and draft release review.
+分支保护、必需 CI、版本标签和草稿发布审阅流程见[发布流程](docs/release-process.md)。
 
-## License
+## 许可证
 
-Original project code is available under the [MIT License](LICENSE). Dependencies retain their own licenses. Vendor services and documentation have their own terms. The project is independent of the store vendors. See [protocol evidence](docs/channels/protocol-evidence.md) for source and implementation boundaries.
+项目原创代码采用 [MIT 许可证](LICENSE)，另附[中文译文](LICENSE.zh-CN.md)。依赖保留各自的许可证，渠道服务和文档适用各自的条款。本项目独立于各渠道厂商。来源和实现边界见[协议验证依据](docs/channels/protocol-evidence.md)。

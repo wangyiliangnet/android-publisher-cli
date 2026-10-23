@@ -1,28 +1,28 @@
-name: Bug report
-description: Report a reproducible CLI or workflow problem using synthetic data.
+name: 问题报告
+description: 使用合成数据报告可复现的 CLI 或工作流问题。
 body:
   - type: markdown
     attributes:
       value: |
-        Use synthetic examples. Do not attach store credentials, signed URLs, APKs,
-        private application identifiers, cookies or raw vendor responses.
-        Report security vulnerabilities through this repository's Security tab.
+        请使用合成示例，不要附带渠道凭据、签名 URL、APK、
+        私有应用标识、Cookie 或渠道原始响应。
+        安全漏洞请通过本仓库的 Security 页面私下报告。
   - type: input
     id: version
     attributes:
-      label: CLI version
-      description: Include the release version and macOS version.
+      label: CLI 版本
+      description: 请提供工具版本和 macOS 版本。
     validations:
       required: true
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
-      description: Provide a minimal synthetic example and the expected/actual behavior.
+      label: 复现步骤
+      description: 请提供最小合成示例，并说明预期行为与实际行为。
     validations:
       required: true
   - type: textarea
     id: diagnostics
     attributes:
-      label: Sanitized diagnostics
-      description: Include only reviewed, redacted output. Omit credentials and account identifiers.
+      label: 脱敏诊断信息
+      description: 仅提供已检查和脱敏的输出，不要包含凭据和账号标识。
