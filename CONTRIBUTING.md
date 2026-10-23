@@ -1,6 +1,6 @@
 # 贡献指南
 
-修改代码、测试或文档时，按本页准备环境、选择检查并提交 PR。使用 CLI 发版请从[首次使用](docs/colleague-quickstart.md)或[日常发布](docs/daily-cli-workflow.md)开始；制作和发布 CLI 安装包见[版本发布](docs/release-process.md)。
+修改代码、测试或文档时，按本页准备环境、选择检查并提交 PR。使用 CLI 发版，请从[首次使用](docs/colleague-quickstart.md)或[日常发布](docs/daily-cli-workflow.md)开始。制作和发布 CLI 安装包见[版本发布](docs/release-process.md)。
 
 ## 开始开发
 
@@ -12,7 +12,7 @@
 
 为本仓库设置 GitHub noreply 提交邮箱。再到 [GitHub 邮箱设置](https://github.com/settings/emails)开启 **Keep my email addresses private（隐藏邮箱地址）**。
 
-网页身份与本地 Git 分开配置，两处都要检查。网页设置也影响 GitHub 生成的 PR 合并元数据；公开信息检查会检查这些内容。邮箱格式和配置方法见 [GitHub 提交邮箱说明](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address)。
+网页身份与本地 Git 分开配置，两处都要检查。网页设置也影响 GitHub 生成的 PR 合并元数据。公开信息检查会检查这些元数据。邮箱格式和配置方法见 [GitHub 提交邮箱说明](https://docs.github.com/en/account-and-profile/how-tos/email-preferences/setting-your-commit-email-address)。
 
 ### 3. 安装固定版本的工具
 
@@ -32,7 +32,7 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check
 
 `make check` 会检查格式和静态问题，运行 Go 竞态、真实浏览器、子进程恢复及打包脚本检查，最后构建程序。Android 集成测试还会验证生成 APK 的签名。测试使用合成数据和临时身份。
 
-检查失败时，先处理报错。必需环境缺失也应算失败，不能静默跳过。若 Go 工具链不在 PATH 中，运行命令时把 `GO` 和 `GOFMT` 都设置为对应工具的绝对路径。
+检查失败时，先处理报错。必需环境缺失也算失败，不能静默跳过。若 Go 工具链不在 PATH 中，运行命令时，将 `GO` 和 `GOFMT` 分别设为对应工具的绝对路径。
 
 ## 按变更选择验收
 
@@ -51,17 +51,17 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 make check
 ## 分支与合并
 
 1. 更新本地 `main`，从最新提交创建 `feat/topic`、`fix/topic` 或 `docs/topic`。代码 agent 使用 `codex/topic`。
-2. 完成修改和相关检查，向 `main` 创建 PR。写清解决的问题、变更后的行为、实际验证、相关 issue、兼容或恢复影响及遗留限制，并更新受影响文档。
+2. 完成修改和相关检查后，向 `main` 创建 PR。说明解决的问题、变更后的行为和实际验证结果。关联相关 issue，说明兼容或恢复影响及遗留限制。更新受影响文档。
 3. 等待最新待合并提交的必需 CI **`check`** 通过，解决审查讨论。
 4. 使用 squash 合并，再删除工作分支。
 
-仓库禁止直接推送、强制推送或删除 `main`。工作分支必须保持最新，旧提交上的成功检查不能代替待合并提交的检查。
+仓库禁止直接推送、强制推送或删除 `main`。工作分支必须保持最新。旧提交上的成功检查不能代替待合并提交的检查。
 
-目前只有一名人工维护者，必需批准数量为零。第二名维护者加入后，应要求至少一名人工批准。subagent 审查可作为补充依据，不等于 GitHub 人工批准。
+目前只有一名人工维护者，必需批准数量为零。第二名维护者加入后，应要求至少一名人工批准。subagent 审查可作为补充依据，不能代替 GitHub 人工批准。
 
 ### CI 做什么
 
-[CI 工作流](.github/workflows/check.yml)在 PR、main 推送和手动触发时运行。运行器、固定依赖和实际步骤都以该文件为准。常规检查仅有仓库只读权限，会取消被新运行取代的旧检查。
+[CI 工作流](.github/workflows/check.yml)在 PR、main 推送和手动触发时运行。运行器、固定依赖和实际步骤都以该文件为准。常规检查仅有仓库只读权限。新运行会取消它所取代的旧检查。
 
 Actions 固定到上游完整 SHA，生产渠道凭据不进入 CI。合并 PR 不授权 Android 应用上传或提审。
 
@@ -80,7 +80,14 @@ Actions 固定到上游完整 SHA，生产渠道凭据不进入 CI。合并 PR �
 | 后续工作 | [路线图](docs/execution-plan.md) |
 | 历史验收 | `docs/archive/` |
 
-安装包 README 只提供离线导航。写教程时，按读者实际操作的顺序组织：先说明准备材料，再给命令，最后告诉读者如何判断结果、失败后从哪里处理。
+安装包 README 只提供离线导航。写教程时，按读者实际操作的顺序组织：先说明准备材料，再给命令。命令后说明如何判断结果，以及失败后如何处理。
+
+文档借鉴 [ASD-STE100 的写作原则](https://www.asd-ste100.org/about.html)，按中文阅读习惯应用，不声明符合该英语规范：
+
+- 用短句交代一个主要意思。操作句直接写明动作；有先后顺序的动作分句说明。
+- 先说明适用条件，再给出操作。将操作与结果分开写，明确成功或失败的判断依据。
+- 同一概念使用同一术语。区分提交受理、审核通过和公开上架，避免用“成功”概括不同状态。
+- 修改文字时保留原有条件、否定、范围和验证程度。命令、字段、路径、链接目标和标题锚点保持准确。
 
 ## 安全与许可
 
