@@ -1,61 +1,39 @@
-# Mac 安装与分发
+# 维护者：构建、签名与分发
 
-支持的分发目标为 Apple Silicon macOS（`darwin-arm64`）。程序名为 `release`，安装包中的 API 命令无需 Go 或 Node 运行环境。APK 验签需要 Android SDK Build Tools 和 JDK。浏览器验收需要固定版本的开发运行环境，但日常生产操作无需先登录浏览器。
+面向为团队制作 CLI 安装包的维护者。安装、升级、回滚和卸载步骤统一见[首次使用](colleague-quickstart.md)；GitHub 标签与草稿操作见[版本发布](release-process.md)。
 
-## 分发方式
+## 选择分发方式
 
 | 安装包 | 用途 | 签名与信任 |
 | --- | --- | --- |
-| `android-publisher-cli-VERSION-darwin-arm64-ci-preview.tar.gz` | CI 验收与公开测试预览 | ad-hoc 临时签名；未公证；没有稳定的钥匙串信任身份 |
-| `android-publisher-cli-VERSION-darwin-arm64.tar.gz` | 本地配置的固定身份分发 | 需明确配置签名身份；公证是单独启用的能力 |
+| `android-publisher-cli-VERSION-darwin-arm64-ci-preview.tar.gz` | 合成数据 CI 验收与公开测试预览 | ad-hoc 临时签名；未公证；没有稳定的钥匙串信任身份 |
+| `android-publisher-cli-VERSION-darwin-arm64.tar.gz` | 本地配置的固定身份分发 | 需明确配置签名身份；公证单独启用 |
 
-安装前阅读该版本的分发说明。校验和用于发现字节变化，签名验证用于检查包签名；两者都不能使 ad-hoc 预览包成为 Apple 信任的分发包。CI 预览构建不使用开发者证书、不复用本地证书配置，也不含生产凭据。
+CI 预览不使用开发者证书、不复用本地签名配置，也不含生产凭据。让同事长期访问生产钥匙串条目前，应采用固定签名身份并在目标 Mac 上验证；ad-hoc 身份随构建变化，可能导致反复授权。
 
-授予生产钥匙串条目长期访问权限前，应先使用固定签名身份。ad-hoc 身份随构建变化，可能导致 macOS 反复请求授权。正式分发需要团队自己的 Developer ID Application 身份、适当的签名设置及 Apple 公证凭据。本仓库不提供这些材料，也不宣称所有版本均已公证。
+正式分发需要团队的 Developer ID Application 身份、相应签名设置和 Apple 公证凭据，本仓库不提供这些材料。固定证书签名也不自动等于已公证，以每个产物的 `DISTRIBUTION.txt` 和实际验证结果为准。
 
-## 安装、升级、回滚与卸载
+## 构建安装包
 
-将压缩包及其 `.sha256` 文件下载到同一目录，核对校验和，解压后运行随附的安装程序：
-
-```sh
-shasum -a 256 -c android-publisher-cli-VERSION-darwin-arm64-ci-preview.tar.gz.sha256
-tar -xzf android-publisher-cli-VERSION-darwin-arm64-ci-preview.tar.gz
-cd android-publisher-cli-VERSION-darwin-arm64-ci-preview
-/bin/sh install.sh
-```
-
-将 `VERSION` 替换为实际版本。默认安装前缀为 `~/.local/android-publisher-cli/`，也可用 `--prefix "/absolute/dedicated/directory"` 指定另一个当前用户所有的目录。请将前缀下的 `bin` 目录加入 PATH。
-
-安装程序检查文件哈希、代码签名、可执行文件架构、所有权和不安全的符号链接，保留各版本目录，并切换 `current` 链接。已安装版本若内容不同，会拒绝安装，需使用新版本号。
-
-升级时，用新安装包的安装程序指定相同前缀。切换可执行文件前，先停止正在执行的发布和查询命令。切回已安装版本时，使用匹配的受管理安装包中的安装程序：
-
-```sh
-/bin/sh install.sh --rollback 0.1.0-beta.1
-/bin/sh install.sh --uninstall
-```
-
-卸载仅删除受管理的命令链接和标记，保留版本文件与发布数据，不删除钥匙串条目。CLI 回滚只切换可执行文件，不降级状态结构，也不绕过恢复或版本检查。状态变化后回滚前，需先检查兼容性。
-
-## 本地构建安装包
-
-在 Apple Silicon macOS 上安装固定版本的 Go，用签名工具配置固定身份，然后运行：
+在 Apple Silicon macOS 上安装仓库固定版本的 Go，使用签名工具配置固定身份，再运行：
 
 ```sh
 PUBLISHER_RELEASE_VERSION=0.1.0-beta.1 make package-macos
 ```
 
-默认打包所需签名身份不可用时会失败，不会静默退回 ad-hoc 签名。仅用于合成数据 CI 预览验收时，可运行：
+默认打包所需身份不可用时会失败，不会退回 ad-hoc。仅做合成数据预览验收时使用：
 
 ```sh
 PUBLISHER_PACKAGE_MODE=ci-preview \
 PUBLISHER_RELEASE_VERSION=0.1.0-beta.1 make package-macos
 ```
 
-压缩包按明确的允许清单收录可执行文件、安装程序、选定使用文档、构建与版本及分发元数据、校验和、MIT 许可证和依赖声明，不包含源码工作区、APK、运行状态、账号配置、浏览器配置或钥匙串内容。
+版本号只是示例，每份不同产物必须使用新版本。CI 预览拒绝 Developer ID 和公证选项；正式签名与公证需独立、明确地配置，不能向 CI 加入渠道生产凭据。
 
-## 验收与来源
+## 随包文档与检查
 
-发布工作流重新执行必需检查，并构建两个合成预览版本，验收安装、升级、回滚、卸载、重复安装、字节变化和不安全符号链接，随后生成带有版本、提交信息及校验和的草稿。维护者审阅后手工发布；该流程不向应用商店提审。
+安装包 README 只提供离线导航。首次使用、日常发布和状态解释面向操作者；构建分发、协议参考及版本发布保留为维护者参考，不重复放入首页操作步骤。
 
-再次分发安装包时保留第三方声明。依赖保留各自的许可证，项目的 MIT 许可证不会替代这些条款。来源和公开发布条件见[发布流程](release-process.md)。
+打包按明确允许清单收录可执行文件、安装程序、文档、构建与版本及分发元数据、校验和、MIT 许可证和依赖声明，不含源码工作区、APK、运行状态、账号配置、浏览器配置或钥匙串内容。再次分发时保留第三方声明，项目 MIT 许可证不替代依赖许可。
+
+交付前检查实际包的签名、架构、版本与提交、校验和、允许清单和离线链接，并完成双版本安装、升级、回滚、卸载及篡改和符号链接拒绝验收。工作流通过只证明这些检查，账号权限和 Apple 信任需按各自条件验证。草稿复核与中断恢复见[版本发布](release-process.md)。

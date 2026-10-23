@@ -33,9 +33,19 @@ mkdir -p "$bundle/bin" "$bundle/docs/channels"
 # Explicit allowlist: no runtime directories, accounts, APKs or source checkout.
 /usr/bin/ditto "$executable" "$bundle/bin/release"
 cp tools/install-macos.sh "$bundle/install.sh"
-sed -e 's|(mac-cli-delivery.md)|(docs/delivery.md)|g' -e 's|(daily-cli-workflow.md)|(docs/daily-cli-workflow.md)|g' -e 's|(channels/automatic-observation.md)|(docs/channels/automatic-observation.md)|g' docs/colleague-quickstart.md > "$bundle/README.md"
+cat > "$bundle/README.md" <<'DOCS'
+# Android 发布工具：离线文档
+
+面向使用 Apple Silicon Mac 的发版同事：
+
+1. 第一次使用或升级：[安装与本机配置](docs/colleague-quickstart.md)。
+2. 项目已配置：[日常发布、查询与恢复](docs/daily-cli-workflow.md)。
+3. 理解查询结果：[状态解释](docs/channels/automatic-observation.md)。
+
+安装前阅读随包 DISTRIBUTION.txt，确认该产物的签名和公证状态。
+DOCS
 cp docs/mac-cli-delivery.md "$bundle/docs/delivery.md"
-sed 's|(mac-cli-delivery.md)|(delivery.md)|g' docs/colleague-quickstart.md > "$bundle/docs/colleague-quickstart.md"
+cp docs/colleague-quickstart.md "$bundle/docs/colleague-quickstart.md"
 cp docs/daily-cli-workflow.md "$bundle/docs/daily-cli-workflow.md"
 cp docs/channels/automatic-observation.md "$bundle/docs/channels/automatic-observation.md"
 cp docs/channels/protocol-evidence.md "$bundle/docs/channels/protocol-evidence.md"

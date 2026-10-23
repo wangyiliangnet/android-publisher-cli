@@ -6,4 +6,4 @@ Go 依赖及其准确版本记录在 go.mod 和 go.sum 中。打包工具会收�
 
 可选的浏览器观测器使用 browser/package-lock.json 固定的依赖，其声明可在安装后的 npm 包中查看。CLI 二进制压缩包不包含 Node.js、Playwright 浏览器及其第三方组件；这些运行环境需另行安装，并遵守各自附带的声明。
 
-渠道文档和 apkgo 项目用于研究协议。本仓库独立实现协议，不包含 apkgo 源码；项目的 MIT 许可证不适用于这些外部来源。来源引用和适用范围见 docs/channels/protocol-evidence.md。
+渠道文档用于协议研究，自动查询流程参考了 [apkgo](https://github.com/KevinGong2013/apkgo) 的一般思路。本仓库独立实现协议和解析器，不包含 apkgo 源码。apkgo 采用 PolyForm Noncommercial 许可证；未经另行授权，不得复制或翻译其源码并按本项目 MIT 许可证使用。渠道文档和服务仍适用各自条款。具体来源见随包或仓库中的 docs/channels/protocol-evidence.md。

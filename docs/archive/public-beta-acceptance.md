@@ -1,4 +1,6 @@
-# 公开测试版验收记录
+# 归档：公开测试版初始验收
+
+> 面向需要回溯早期交付的维护者。本页保留 2026-10-23 初始测试版的验收与修订记录，不作为当前操作规范。最新检查以 [CI 历史](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml)为准；开发要求见[贡献指南](../../CONTRIBUTING.md)，后续计划见[维护路线图](../execution-plan.md)。
 
 本记录针对公开 CLI，使用 Apple Silicon macOS 和合成输入验收，不代表已核实渠道账号、应用或生产提交，也不代表完成 Apple 公证。
 
