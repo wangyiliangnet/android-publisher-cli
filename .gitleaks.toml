@@ -1,0 +1,13 @@
+title = "Android Publisher CLI public source scan"
+
+[extend]
+useDefault = true
+
+# A deterministic redaction-test token, restricted to this file AND this secret.
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Synthetic context sanitizer regression fixture"
+condition = "AND"
+paths = ['''(^|/)internal/protocol/context_test\.go$''']
+regexTarget = "secret"
+regexes = ['''^0123456789abcdef(?:0123456789abcdef)?$''']

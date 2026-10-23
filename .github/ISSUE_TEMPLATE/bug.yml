@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible CLI or workflow problem using synthetic data.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use synthetic examples. Do not attach store credentials, signed URLs, APKs,
+        private application identifiers, cookies or raw vendor responses.
+        Report security vulnerabilities through this repository's Security tab.
+  - type: input
+    id: version
+    attributes:
+      label: CLI version
+      description: Include the release version and macOS version.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal synthetic example and the expected/actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Include only reviewed, redacted output. Omit credentials and account identifiers.

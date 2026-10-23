@@ -1,0 +1,271 @@
+name: Draft CI Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: SemVer without v; creates an ad-hoc signed, unnotarized draft preview.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: draft-ci-preview
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate current main and version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.validate.outputs.sha }}
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - name: Reject dispatch from any other branch or stale main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.ref }}
+          TESTED_SHA: ${{ github.sha }}
+        run: |
+          test "$WORKFLOW_REF" = 'refs/heads/main'
+          current=$(gh api "repos/$GH_REPO/commits/main" --jq .sha)
+          test "$current" = "$TESTED_SHA"
+
+      - name: Check out the exact main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate strict SemVer without interpreting it as shell code
+        id: validate
+        env:
+          VERSION: ${{ inputs.version }}
+          TESTED_SHA: ${{ github.sha }}
+        run: |
+          python3 tools/ci-release-version.py "$VERSION"
+          printf 'version=%s\nsha=%s\n' "$VERSION" "$TESTED_SHA" >> "$GITHUB_OUTPUT"
+
+  check:
+    needs: validate
+    uses: ./.github/workflows/check.yml
+    permissions:
+      contents: read
+    with:
+      package_version: ${{ needs.validate.outputs.version }}
+
+  draft:
+    name: Create draft only from the tested main commit
+    needs: [validate, check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # No repository checkout or production credentials in the write-capable job.
+      - name: Download the immutable artifact from this run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ci-preview-package
+          path: release-assets
+
+      - name: Verify the two exact assets and their checksum
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          TESTED_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib, re
+          version = os.environ['VERSION']
+          assert re.fullmatch(r'[0-9A-Za-z.+-]{1,100}', version)
+          assert re.fullmatch(r'[0-9a-f]{40}', os.environ['TESTED_SHA'])
+          name = f'android-publisher-cli-{version}-darwin-arm64-ci-preview.tar.gz'
+          root = pathlib.Path('release-assets')
+          assert {p.name for p in root.iterdir()} == {name, name + '.sha256'}
+          assert all(p.is_file() and not p.is_symlink() for p in root.iterdir())
+          checksum = (root / (name + '.sha256')).read_text()
+          match = re.fullmatch(r'([0-9a-f]{64})  ' + re.escape(name) + r'\n', checksum)
+          assert match and hashlib.sha256((root / name).read_bytes()).hexdigest() == match.group(1)
+          PY
+
+      - name: Create or recover the exact tested draft CI preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          TESTED_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          python3 - <<'PY'
+          # BEGIN CI_DRAFT_RECOVERY
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import urllib.parse
+
+
+          class ReleaseError(RuntimeError):
+              pass
+
+
+          def require(condition, message):
+              if not condition:
+                  raise ReleaseError(message)
+
+
+          def gh_api(method, endpoint, *, payload=None, source=None, binary=False, missing_ok=False):
+              command = ['gh', 'api', '--method', method, endpoint,
+                         '-H', 'Accept: ' + ('application/octet-stream' if binary else 'application/vnd.github+json'),
+                         '-H', 'X-GitHub-Api-Version: 2022-11-28']
+              data = None
+              if payload is not None:
+                  command += ['--input', '-']
+                  data = json.dumps(payload).encode()
+              if source is not None:
+                  command += ['--input', str(source), '-H', 'Content-Type: application/octet-stream']
+              try:
+                  result = subprocess.run(command, input=data, capture_output=True, timeout=90, check=False)
+              except (OSError, subprocess.TimeoutExpired):
+                  raise ReleaseError('GitHub request outcome is unknown; rerun the failed job to reconcile it.') from None
+              if result.returncode != 0:
+                  if missing_ok and result.stderr.decode(errors='replace').strip().endswith('(HTTP 404)'):
+                      return None
+                  raise ReleaseError('GitHub request failed or its outcome is unknown; rerun the failed job to reconcile it.')
+              if binary:
+                  return result.stdout
+              try:
+                  return json.loads(result.stdout)
+              except (ValueError, UnicodeError):
+                  raise ReleaseError('GitHub returned an unverifiable response; rerun to reconcile it.') from None
+
+
+          def release_draft(api, version, tested_sha, repo, root):
+              require(re.fullmatch(r'[0-9A-Za-z.+-]{1,100}', version), 'Invalid release version.')
+              require(re.fullmatch(r'[0-9a-f]{40}', tested_sha), 'Invalid tested commit.')
+              require(re.fullmatch(r'[0-9A-Za-z_.-]+/[0-9A-Za-z_.-]+', repo), 'Invalid repository.')
+              name = f'android-publisher-cli-{version}-darwin-arm64-ci-preview.tar.gz'
+              expected = {name: root / name, name + '.sha256': root / (name + '.sha256')}
+              require({p.name for p in root.iterdir()} == set(expected), 'Expected exactly two release assets.')
+              require(all(p.is_file() and not p.is_symlink() for p in expected.values()), 'Assets must be regular files.')
+              checksums = {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in expected.items()}
+              require(expected[name + '.sha256'].read_text() == checksums[name] + '  ' + name + '\n', 'Archive checksum mismatch.')
+              base = f'repos/{repo}'
+              tag = 'v' + version
+              ref_path = base + '/git/ref/tags/' + urllib.parse.quote(tag, safe='')
+              title = tag + ' (CI preview, ad-hoc signed, unnotarized)'
+              notes = (
+                  f'CI preview for tested main commit `{tested_sha}`.\n\n'
+                  'This Apple Silicon package is ad-hoc signed and unnotarized. It has no stable Keychain trust identity. '
+                  'It is intended for evaluation; use the documented local Developer ID signing process for trusted team distribution.\n\n'
+                  'The workflow reran public-source scans, workflow lint, native Keychain, real APK verification, Chromium, Go race/vet, '
+                  'interrupted-write recovery, package installation, upgrade, rollback, and tamper checks. '
+                  'No production channel credentials or APKs were used.\n\n'
+                  'Review the source commit, checks, checksum, and package before manually publishing this draft. '
+                  'Publishing this draft does not publish an Android application.\n\n'
+                  f'<!-- ci-preview-v1 source={tested_sha} archive-sha256={checksums[name]} '
+                  f'checksum-sha256={checksums[name + ".sha256"]} -->\n'
+              )
+
+              def verify_tag():
+                  reference = api('GET', ref_path, missing_ok=True)
+                  if reference is not None:
+                      require(reference.get('ref') == 'refs/tags/' + tag and
+                              reference.get('object', {}).get('type') == 'commit' and
+                              reference['object'].get('sha') == tested_sha,
+                              'Existing tag is not the exact tested lightweight tag; no changes were made.')
+                  return reference
+
+              require(api('GET', base + '/commits/main').get('sha') == tested_sha, 'The tested commit is no longer current main.')
+              tag_exists = verify_tag() is not None
+
+              # Listing includes drafts for the write-capable token; never mistake an
+              # inaccessible draft or an HTTP error for proof that a version is unused.
+              matches = []
+              for page in range(1, 51):
+                  releases = api('GET', base + f'/releases?per_page=100&page={page}')
+                  require(isinstance(releases, list), 'Invalid release listing.')
+                  matches.extend(item for item in releases if item.get('tag_name') == tag)
+                  if len(releases) < 100:
+                      break
+              else:
+                  raise ReleaseError('Release listing exceeded the safe bound; inspect this version manually.')
+              require(len(matches) <= 1, 'More than one release matches this version; inspect it manually.')
+              if matches:
+                  previous = matches[0]
+                  require(previous.get('draft') is True and previous.get('published_at') is None,
+                          'This version is already published; no release or assets will be changed.')
+                  require(previous.get('target_commitish') == tested_sha and previous.get('name') == title and
+                          previous.get('body') == notes and previous.get('prerelease') is True,
+                          'Existing draft metadata does not match these tested assets; inspect it manually.')
+              if not tag_exists:
+                  api('POST', base + '/git/refs', payload={'ref': 'refs/tags/' + tag, 'sha': tested_sha})
+                  require(verify_tag() is not None, 'Created tag could not be verified; rerun to reconcile it.')
+              if not matches:
+                  release = api('POST', base + '/releases', payload={
+                      'tag_name': tag, 'target_commitish': tested_sha, 'name': title, 'body': notes,
+                      'draft': True, 'prerelease': True,
+                  })
+              else:
+                  release = matches[0]
+              release_id = release.get('id')
+              require(isinstance(release_id, int) and not isinstance(release_id, bool) and release_id > 0, 'Invalid release identity.')
+              release_path = base + f'/releases/{release_id}'
+
+              def verify_draft():
+                  current = api('GET', release_path)
+                  require(current.get('draft') is True and current.get('published_at') is None,
+                          'This version is already published; no release or assets will be changed.')
+                  require(current.get('id') == release_id and current.get('tag_name') == tag and
+                          current.get('target_commitish') == tested_sha and current.get('name') == title and
+                          current.get('body') == notes and current.get('prerelease') is True,
+                          'Existing draft metadata does not match these tested assets; inspect it manually.')
+                  require(verify_tag() is not None, 'The tested tag disappeared; inspect this version manually.')
+
+              def verified_assets():
+                  assets = api('GET', release_path + '/assets?per_page=100')
+                  require(isinstance(assets, list) and len(assets) <= 2, 'Unexpected release assets; no assets will be replaced.')
+                  found = set()
+                  for asset in assets:
+                      asset_name = asset.get('name')
+                      require(asset_name in expected and asset_name not in found, 'Unexpected or duplicate release asset.')
+                      found.add(asset_name)
+                      asset_id = asset.get('id')
+                      require(isinstance(asset_id, int) and not isinstance(asset_id, bool) and asset_id > 0 and
+                              asset.get('state') == 'uploaded' and asset.get('size') == expected[asset_name].stat().st_size,
+                              'Existing release asset is incomplete or has a different size; it will not be replaced.')
+                      # Compare actual downloaded bytes, not only API size/digest metadata.
+                      content = api('GET', base + f'/releases/assets/{asset_id}', binary=True)
+                      require(hashlib.sha256(content).hexdigest() == checksums[asset_name],
+                              'Existing release asset has different bytes; it will not be replaced.')
+                  return found
+
+              verify_draft()
+              found = verified_assets()
+              for asset_name in sorted(expected):
+                  if asset_name in found:
+                      continue
+                  # Recheck before every write. Never PATCH/DELETE/clobber an existing
+                  # release, tag, or asset; an unknown POST is reconciled on the next run.
+                  verify_draft()
+                  found = verified_assets()
+                  if asset_name not in found:
+                      endpoint = f'https://uploads.github.com/repos/{repo}/releases/{release_id}/assets?name=' + urllib.parse.quote(asset_name, safe='')
+                      api('POST', endpoint, source=expected[asset_name])
+              verify_draft()
+              require(verified_assets() == set(expected), 'Release asset verification is incomplete; rerun to reconcile it.')
+              print('Verified draft CI preview with exactly two matching assets; nothing was published.')
+
+
+          if __name__ == '__main__':
+              try:
+                  release_draft(gh_api, os.environ['VERSION'], os.environ['TESTED_SHA'], os.environ['GH_REPO'], pathlib.Path('release-assets'))
+              except (ReleaseError, OSError, ValueError) as error:
+                  raise SystemExit(str(error)) from None
+          # END CI_DRAFT_RECOVERY
+          PY
