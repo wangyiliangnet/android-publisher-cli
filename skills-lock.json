@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "zh-tech-writing": {
+      "source": "leter/zh-tech-writing",
+      "sourceType": "github",
+      "skillPath": "skills/zh-tech-writing/SKILL.md",
+      "computedHash": "87336874d11e9e9cdc2f3121cec91b3dc1a7c49236cdd8316ec7cfeaa1899f3b"
+    }
+  }
+}
