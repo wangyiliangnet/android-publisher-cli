@@ -90,3 +90,9 @@ commit, no earlier Git objects, and only documentation differences from the
 reviewed source. Anonymous checks cannot resolve the earlier test-merge object
 through either the public repository or its private archive. Contributor account
 privacy was checked before opening the clean repository's acceptance PR.
+
+A hosted cold Chromium launch/capture exceeded the acceptance fixture's former
+10-second request budget. The fixture now uses the protocol's existing maximum
+of 30 seconds. Runtime behavior and protocol limits are unchanged, while dedicated
+deadline and cancellation tests keep their own short bounds. Checks are not
+retried automatically or skipped after a timeout.

@@ -4,6 +4,7 @@
 
 - Establish the clean public source baseline with noreply commit identities.
 - Retain the reviewed package documentation and complete acceptance gates.
+- Allow the existing bounded 30-second budget for real Chromium acceptance on cold runners.
 
 ## 0.1.0-beta.2
 
