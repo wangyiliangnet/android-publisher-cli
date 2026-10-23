@@ -29,7 +29,10 @@ async function fixture(fn) {
   async function request() {
     const evidence = path.join(root, 'evidence', (serial++).toString(16).padStart(64, '0'));
     await mkdir(evidence, { mode: 0o700, recursive: true });
-    return { schema_version: 1, mode: 'simulation', target: t, url, profile_dir: profile, evidence_dir: evidence, timeout_ms: 10000 };
+    // Shared runners can spend over 10s on a cold Chromium launch and capture.
+    // Use the existing protocol maximum; explicit cancellation/deadline cases
+    // retain their own smaller bounds.
+    return { schema_version: 1, mode: 'simulation', target: t, url, profile_dir: profile, evidence_dir: evidence, timeout_ms: 30000 };
   }
   try { await fn({ t, root, request, handler: value => { handler = value; } }); }
   finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); }
