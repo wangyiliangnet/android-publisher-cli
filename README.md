@@ -1,26 +1,34 @@
-# Android 发布工具（Android Publisher CLI）
+# Android 发布工具
 
-[![CI](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/wangyiliangnet/android-publisher-cli/actions/workflows/check.yml)
+这个 CLI 使用 TypeScript 和 npm 构建。在 Apple Silicon Mac 上，它可向华为、荣耀、小米、OPPO、vivo 和应用宝提交已有应用的 Android 版本更新。发布规则固定为“审核通过后立即发布”。
 
-在 Apple Silicon Mac 上，用 `release` 向华为、荣耀、小米、OPPO、vivo 和应用宝提交 Android 版本更新。账号凭据保存在 macOS 钥匙串，APK 和发布记录保留在本机。
+凭据默认在终端交互输入。CLI 不读取 macOS 钥匙串，也不保存用户输入的渠道密钥。发布批次、操作日志、短期令牌和上传授权保存在本机私有目录。真实渠道账号尚未完成新版实现的逐一验证；合成测试通过不代表账号具备发布权限。
 
-日常操作文档以六个渠道一起发布为例。先准备各渠道 APK 和更新说明，再检查账号与应用。审阅本次提交后，上传 APK 并提审。提交后可以查询进度、导出报告。中途出错时，先核对结果，再继续。
+## 开始使用
 
-当前为公开测试版，只支持已有应用的版本更新。发布规则为“审核通过后立即发布”。**使用真实凭据前，请向维护者取得固定签名包，并先用测试应用确认账号权限。** CI 预览包使用 ad-hoc 临时签名，未公证。合成测试通过不代表真实渠道权限已验证。
+先安装 [`.node-version`](.node-version) 指定的 Node.js，以及 Android SDK Build Tools 和 JDK。安装与项目配置见[首次使用](docs/colleague-quickstart.md)。
 
-## 按你的工作选择入口
+```sh
+npm ci --ignore-scripts
+npm run build
+node build/cli.js doctor
+```
 
-| 你要做什么 | 从哪里开始 | 完成后能做什么 |
-| --- | --- | --- |
-| 第一次使用 | [首次使用](docs/colleague-quickstart.md) | 安装工具，配置六个渠道并导入凭据 |
-| 发布一个新版本 | [日常发布](docs/daily-cli-workflow.md) | 逐步完成准备、预检、审阅、提交和查询 |
-| 看不懂查询结果 | [状态解释](docs/channels/automatic-observation.md) | 区分已受理、审核、上架、推测和缓存 |
-| 修改代码或文档 | [贡献指南](CONTRIBUTING.md) | 配置开发环境，完成检查并提交 PR |
-| 修改发布逻辑或渠道接口 | [架构](docs/architecture.md)、[协议参考](docs/channels/protocol-evidence.md) | 查找模块职责、恢复约束和接口依据 |
-| 给同事制作安装包或发布 CLI 版本 | [构建与分发](docs/mac-cli-delivery.md)、[版本发布](docs/release-process.md) | 构建签名包，核验产物并复核发布草稿 |
+运行 `release prepare` 后，按[日常发布](docs/daily-cli-workflow.md)完成预检、审阅、提交和查询。**真实提交会上传 APK 并提审。** 请先核对应用、产物和渠道范围的授权。
 
-后续计划见[维护路线图](docs/execution-plan.md)。代码 agent 从 [AGENTS.md](AGENTS.md) 开始；漏洞报告方式见[安全政策](SECURITY.md)。
+## 阅读入口
+
+| 任务 | 文档 |
+| --- | --- |
+| 安装、配置、输入凭据 | [首次使用](docs/colleague-quickstart.md) |
+| 准备批次、提交、查询和恢复 | [日常发布](docs/daily-cli-workflow.md) |
+| 理解审核、上架和查询状态 | [自动查询说明](docs/channels/automatic-observation.md) |
+| 修改代码、测试或提交 PR | [贡献指南](CONTRIBUTING.md) |
+| 查看状态机和渠道依据 | [架构](docs/architecture.md)、[协议参考](docs/channels/protocol-evidence.md) |
+| 打包或发布 npm 产物 | [构建与分发](docs/mac-cli-delivery.md)、[版本发布](docs/release-process.md) |
+
+0.1.x Go 版的本地状态不会迁入新版。新版数据保存在 `~/Library/Application Support/AndroidPublisherCLI/v2/`。迁移范围见[更新记录](CHANGELOG.md)。
 
 ## 许可证
 
-项目原创代码采用 [MIT 许可证](LICENSE)，另附[中文译文](LICENSE.zh-CN.md)。依赖和协议参考来源保留各自的许可条款，见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目独立于各渠道厂商。
+原创代码采用 [MIT 许可证](LICENSE)。依赖和协议来源见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目独立于各渠道厂商。

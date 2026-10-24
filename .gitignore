@@ -2,6 +2,7 @@
 /.local/
 /bin/
 /dist/
+/build/
 /coverage/
 /node_modules/
 /browser/node_modules/

@@ -1,0 +1,27 @@
+{
+  "name": "android-publisher-cli",
+  "version": "0.2.0-dev",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "files": ["build", "docs", ".node-version", "README.md", "CONTRIBUTING.md", "AGENTS.md", "CHANGELOG.md", "LICENSE", "LICENSE.zh-CN.md", "THIRD_PARTY_NOTICES.md"],
+  "bin": {
+    "release": "./build/cli.js"
+  },
+  "engines": {
+    "node": "24.22.0",
+    "npm": "11.19.1"
+  },
+  "packageManager": "npm@11.19.1",
+  "scripts": {
+    "build": "rm -rf build && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "pack:check": "npm run check && npm pack --dry-run --json",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
+}

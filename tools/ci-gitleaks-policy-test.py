@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ensure the single synthetic allowance cannot hide a different credential."""
+"""Ensure the historical synthetic exception cannot hide another credential."""
 import hashlib
 from pathlib import Path
 import shutil
@@ -14,6 +14,7 @@ fixture = "01234567" + "89abcdef"
 cases = [
     ("internal/protocol/context_test.go", fixture, 0),
     ("internal/protocol/context_test.go", fixture * 2, 0),
+    ("src/model.ts", fixture, 1),
     ("other.go", fixture * 2, 1),
     ("internal/protocol/context_test.go", hashlib.sha256(b"synthetic-rejected-credential").hexdigest(), 1),
 ]
@@ -25,5 +26,5 @@ for path, secret, expected in cases:
         target.write_text('api_key = "' + secret + '"\n')
         result = subprocess.run([scanner, "--redact=100", "--no-banner", "--config", str(config), "dir", str(root)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
         if result.returncode != expected:
-            raise SystemExit("Gitleaks synthetic allowance regression failed; no findings were printed.")
-print("Gitleaks exact path-and-secret allowance regression checks passed.")
+            raise SystemExit("Gitleaks historical allowance regression failed; no findings were printed.")
+print("Gitleaks historical path-and-value allowance remains narrowly scoped.")

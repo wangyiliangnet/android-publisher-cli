@@ -21,6 +21,6 @@ rm -f "$answers" "$archive"
 "$sdk_root/build-tools/36.1.0/aapt2" version
 "$sdk_root/build-tools/36.1.0/apksigner" version
 if [ -n "${GITHUB_ENV:-}" ]; then
-    printf 'PUBLISHER_TEST_SDK_ROOT=%s\nPUBLISHER_TEST_JAVA_HOME=%s\n' "$sdk_root" "$JAVA_HOME" >> "$GITHUB_ENV"
+    printf 'ANDROID_SDK_ROOT=%s\n' "$sdk_root" >> "$GITHUB_ENV"
 fi
 printf '%s\n' 'Installed isolated Android platform 36 / build-tools 36.1.0 / cmdline-tools 22.0.'
