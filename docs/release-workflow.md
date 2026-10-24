@@ -1,6 +1,6 @@
 # 发布应用更新
 
-本页以项目 `demo` 一次更新六个渠道为例。先完成[安装与配置](getting-started.md)，准备各渠道 APK 和更新说明。示例路径须替换为本机绝对路径。CLI 只更新渠道中已有的应用。
+示例项目 `demo` 包含六个渠道。先完成[安装与配置](getting-started.md)，准备各渠道 APK 和更新说明。将示例路径换成本机绝对路径。CLI 只更新渠道中已有的应用。
 
 ## 准备批次
 
@@ -27,7 +27,11 @@
 android-release prepare --file "/absolute/path/batch.json"
 ```
 
-`prepare` 验签 APK，核对项目包名、签名和版本，再把产物复制到本机私有目录。成功时，输出的 `batch_id` 应为 `demo-1-0-0`，`total_targets` 应为 `6`。命令离线运行。输入有误时先修正；更换 APK 或说明时使用新的批次名。
+`prepare` 验签所有 APK，检查包名、版本和签名是否一致。小米、OPPO 和 vivo 的应用 ID 还须与 APK 包名一致。检查过程不访问渠道。
+
+CLI 会显示包名、版本名（`versionName`）和版本代码（`versionCode`）。核对后输入 `yes`，才会冻结产物并保存批次。命令需要可交互的终端。
+
+成功时，`batch_id` 应为 `demo-1-0-0`，`total_targets` 应为 `6`。输入有误时先修正；更换 APK 或说明时使用新的批次名。确认后若 APK 文件变化，CLI 会拒绝保存批次。
 
 ## 预检
 
