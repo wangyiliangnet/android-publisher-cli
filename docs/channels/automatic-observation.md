@@ -3,7 +3,7 @@
 提交后运行以下命令查询当前批次：
 
 ```sh
-release batch status --batch demo-1-0-0 --refresh
+android-release batch status --batch demo-1-0-0 --refresh
 ```
 
 CLI 会在终端提示输入所需凭据。去掉 `--refresh` 时，只读取本地缓存。查看结果时，先看进程退出码，再看 `targets` 中每个渠道的字段。
@@ -31,7 +31,7 @@ OPPO 要求目标版本、已上传 APK 的 MD5 和版本标识一致。vivo 要
 网络中断或进程结束后，先读取本地状态，再运行：
 
 ```sh
-release batch reconcile --batch demo-1-0-0
+android-release batch reconcile --batch demo-1-0-0
 ```
 
 `reconcile` 只做读取。当前适配器没有足够的响应丢失核对依据，因此未决操作会继续阻塞。`resume` 不会重发未决步骤。请在渠道后台核实具体操作，再交给维护者处理；不要删除 SQLite 记录来绕过阻塞。

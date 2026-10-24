@@ -54,18 +54,18 @@ function toolFlags(f: Flags): AndroidTools {
 
 function help(): void {
   process.stdout.write(`Android Publisher CLI (TypeScript + npm)\n\n` +
-    `release doctor [--sdk-root DIR] [--java-home DIR]\n` +
-    `release inspect --apk /absolute/file.apk\n` +
-    `release setup --project ID --apk /absolute/trusted.apk\n` +
-    `release setup --file /absolute/project.json --apk /absolute/trusted.apk [--replace]\n` +
-    `release prepare --file /absolute/batch.json\n` +
-    `release batch preflight --batch ID [--channels LIST] [--credentials-file FILE]\n` +
-    `release batch review --batch ID --file /absolute/approval.json [--channels LIST]\n` +
-    `release batch submit|resume --batch ID --approval FILE --approve-plan SHA256 [--credentials-file FILE]\n` +
-    `release batch status --batch ID [--refresh] [--credentials-file FILE]\n` +
-    `release batch reconcile --batch ID [--credentials-file FILE]\n` +
-    `release batch report --batch ID --file /absolute/report.md\n` +
-    `release history | protocols | version [--json]\n\n` +
+    `android-release doctor [--sdk-root DIR] [--java-home DIR]\n` +
+    `android-release inspect --apk /absolute/file.apk\n` +
+    `android-release setup --project ID --apk /absolute/trusted.apk\n` +
+    `android-release setup --file /absolute/project.json --apk /absolute/trusted.apk [--replace]\n` +
+    `android-release prepare --file /absolute/batch.json\n` +
+    `android-release batch preflight --batch ID [--channels LIST] [--credentials-file FILE]\n` +
+    `android-release batch review --batch ID --file /absolute/approval.json [--channels LIST]\n` +
+    `android-release batch submit|resume --batch ID --approval FILE --approve-plan SHA256 [--credentials-file FILE]\n` +
+    `android-release batch status --batch ID [--refresh] [--credentials-file FILE]\n` +
+    `android-release batch reconcile --batch ID [--credentials-file FILE]\n` +
+    `android-release batch report --batch ID --file /absolute/report.md\n` +
+    `android-release history | protocols | version [--json]\n\n` +
     `Credentials are requested in the terminal by default. A 0600 JSON file is supported for automation.\n`);
 }
 
@@ -216,7 +216,7 @@ async function run(args: string[]): Promise<number> {
       throw new Error('unsupported batch action');
     } finally { store.close(); }
   }
-  throw new Error('unsupported command; run release --help');
+  throw new Error('unsupported command; run android-release --help');
 }
 
 run(process.argv.slice(2)).then(code => { process.exitCode = code; }).catch(error => {

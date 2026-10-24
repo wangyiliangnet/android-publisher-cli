@@ -46,7 +46,7 @@ export class AndroidTools {
   }
 
   command(executable: string, args: string[]): string {
-    if (!executable || !fs.existsSync(executable)) throw new Error('Android tool is unavailable; run release doctor');
+    if (!executable || !fs.existsSync(executable)) throw new Error('Android tool is unavailable; run android-release doctor');
     const result = spawnSync(executable, args, { encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024,
       env: { ...process.env, JAVA_HOME: this.javaHome } });
     if (result.status !== 0 || result.error) throw new Error(`${path.basename(executable)} failed; check the SDK, JDK and APK`);

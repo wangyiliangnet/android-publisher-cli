@@ -4,13 +4,21 @@
 
 ## 安装 CLI
 
-从维护者取得已验收的 npm tarball 和 SHA-256 文件。先核对摘要，再安装对应文件。下面的版本号仅作示例：
+安装 npm 上的正式版本，并核对命令。首次公开发布前，可从维护者取得已验收的 npm tarball 和 SHA-256 文件，先核对摘要再安装。下面的版本号仅作 tarball 示例：
 
 ```sh
-shasum -a 256 -c android-publisher-cli-0.2.0-dev.tgz.sha256
-npm install --global ./android-publisher-cli-0.2.0-dev.tgz
-release version --json
-release doctor
+npm install --global android-publisher-cli
+android-release version --json
+android-release doctor
+```
+
+离线安装时使用维护者交付的文件：
+
+```sh
+shasum -a 256 -c android-publisher-cli-0.2.0.tgz.sha256
+npm install --global ./android-publisher-cli-0.2.0.tgz
+android-release version --json
+android-release doctor
 ```
 
 校验输出应为 `OK`。`version` 应显示你安装的版本。`doctor` 的 `ready` 为 `true` 时，表示已找到 APK 检查工具。若工具未找到，先检查 SDK 和 JDK 路径，再使用 `ANDROID_SDK_ROOT` 与 `JAVA_HOME` 指向本机安装目录。
@@ -22,7 +30,7 @@ release doctor
 准备一份你信任的已签名、不可调试 APK。下面的命令读取包名和签名，并打开项目向导；它不会上传 APK：
 
 ```sh
-release setup --project demo --apk "/absolute/path/trusted.apk"
+android-release setup --project demo --apk "/absolute/path/trusted.apk"
 ```
 
 先核对显示的包名与签名 SHA-256。输入 `yes` 后选择渠道，填写公开账号和应用标识。最后再次输入 `yes` 保存项目。输入 `cancel` 可退出向导。项目保存在 `~/Library/Application Support/AndroidPublisherCLI/v2/projects/`。
@@ -52,7 +60,7 @@ CLI 不读取钥匙串。短期访问令牌和上传授权会保存在本机私�
 
 ## 升级与卸载
 
-停止正在运行的发布命令，再安装新版 tarball。运行 `release version --json` 核对版本。回退时，重新安装你保留的旧版 tarball；先确认旧程序能读取当前 `v2` 状态结构。
+停止正在运行的发布命令，再安装指定版本的 npm 包或 tarball。运行 `android-release version --json` 核对版本。回退时，重新安装你保留的旧版包；先确认旧程序能读取当前 `v2` 状态结构。预发布版本可用 `npm install --global android-publisher-cli@next` 安装。
 
 ```sh
 npm uninstall --global android-publisher-cli

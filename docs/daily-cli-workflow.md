@@ -24,7 +24,7 @@
 ```
 
 ```sh
-release prepare --file "/absolute/path/batch.json"
+android-release prepare --file "/absolute/path/batch.json"
 ```
 
 命令会验签每份 APK，核对项目包名、签名及一致的版本。随后把产物复制到本机私有目录，并保存不可变批次。输出的 `batch_id` 应是 `demo-1-0-0`，`total_targets` 应为 `6`。失败时修正输入，再重新运行。换 APK 或说明时，使用新的批次名。
@@ -32,7 +32,7 @@ release prepare --file "/absolute/path/batch.json"
 `prepare` 不访问渠道。下一步才会读取真实账号数据：
 
 ```sh
-release batch preflight --batch demo-1-0-0
+android-release batch preflight --batch demo-1-0-0
 ```
 
 CLI 会在终端提示六个渠道的凭据。预检读取账号和应用状态，并保存与批次绑定的结果。它不上传 APK 或提审。查看 `errors`，逐项处理失败的渠道。某个渠道成功不能代替整个批次通过。
@@ -42,7 +42,7 @@ CLI 会在终端提示六个渠道的凭据。预检读取账号和应用状态�
 预检全部通过后，先建好仅自己可访问的输出目录，再生成批准文件：
 
 ```sh
-release batch review --batch demo-1-0-0 \
+android-release batch review --batch demo-1-0-0 \
   --file "/absolute/path/approval.json"
 ```
 
@@ -51,7 +51,7 @@ release batch review --batch demo-1-0-0 \
 **下面的命令会上传 APK 并向六个渠道提审。** 确认你已获得覆盖应用、产物和渠道范围的授权。把摘要原样填入命令：
 
 ```sh
-release batch submit --batch demo-1-0-0 \
+android-release batch submit --batch demo-1-0-0 \
   --approval "/absolute/path/approval.json" \
   --approve-plan APPROVAL_PLAN_FROM_REVIEW
 ```
@@ -63,10 +63,10 @@ release batch submit --batch demo-1-0-0 \
 ## 查询与报告
 
 ```sh
-release batch status --batch demo-1-0-0 --refresh
-release batch report --batch demo-1-0-0 \
+android-release batch status --batch demo-1-0-0 --refresh
+android-release batch report --batch demo-1-0-0 \
   --file "/absolute/path/report.md"
-release history
+android-release history
 ```
 
 刷新状态会提示输入凭据，并分别记录执行、审核、上架和查询健康。不加 `--refresh` 时，`status` 只读缓存。理解小米和应用宝的未关联信息，请读[自动查询说明](channels/automatic-observation.md)。
@@ -78,8 +78,8 @@ release history
 网络错误或终端退出后，先看缓存，再运行只读核对：
 
 ```sh
-release batch status --batch demo-1-0-0
-release batch reconcile --batch demo-1-0-0
+android-release batch status --batch demo-1-0-0
+android-release batch reconcile --batch demo-1-0-0
 ```
 
 响应丢失时，请求可能已经生效。当前协议证据不足以自动确认这些写入；`reconcile` 会保留阻塞。不要删除状态库、修改回执或创建新批次来绕过未决写入。核查远端结果后，交给维护者处理。
@@ -87,7 +87,7 @@ release batch reconcile --batch demo-1-0-0
 若没有未决写入，且只是后续步骤未完成，可继续使用原批准文件：
 
 ```sh
-release batch resume --batch demo-1-0-0 \
+android-release batch resume --batch demo-1-0-0 \
   --approval "/absolute/path/approval.json" \
   --approve-plan APPROVAL_PLAN_FROM_REVIEW
 ```

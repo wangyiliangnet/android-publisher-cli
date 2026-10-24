@@ -14,7 +14,7 @@ npm run build
 node build/cli.js doctor
 ```
 
-运行 `release prepare` 后，按[日常发布](docs/daily-cli-workflow.md)完成预检、审阅、提交和查询。**真实提交会上传 APK 并提审。** 请先核对应用、产物和渠道范围的授权。
+运行 `android-release prepare` 后，按[日常发布](docs/daily-cli-workflow.md)完成预检、审阅、提交和查询。**真实提交会上传 APK 并提审。** 请先核对应用、产物和渠道范围的授权。
 
 ## 阅读入口
 

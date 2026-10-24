@@ -34,7 +34,7 @@ jobs:
         run: |
           test "$(uname -m)" = arm64
           actionlint -color
-          python3 tools/ci-release-version.py --self-test
+          python3 tools/release-version.py --self-test
           python3 tools/ci-public-scan-test.py
           python3 tools/ci-gitleaks-policy-test.py
           python3 tools/ci-public-scan.py
@@ -71,4 +71,4 @@ jobs:
           archive="$RUNNER_TEMP/$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
           test -f "$archive"
           npm install --global --prefix "$RUNNER_TEMP/publisher-install" --ignore-scripts --no-audit --no-fund "$archive"
-          "$RUNNER_TEMP/publisher-install/bin/release" version --json
+          "$RUNNER_TEMP/publisher-install/bin/android-release" version --json

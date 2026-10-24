@@ -1,12 +1,21 @@
 {
   "name": "android-publisher-cli",
   "version": "0.2.0-dev",
-  "private": true,
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wangyiliangnet/android-publisher-cli.git"
+  },
+  "homepage": "https://github.com/wangyiliangnet/android-publisher-cli#readme",
+  "bugs": "https://github.com/wangyiliangnet/android-publisher-cli/issues",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "files": ["build", "docs", ".node-version", "README.md", "CONTRIBUTING.md", "AGENTS.md", "CHANGELOG.md", "LICENSE", "LICENSE.zh-CN.md", "THIRD_PARTY_NOTICES.md"],
   "bin": {
-    "release": "./build/cli.js"
+    "android-release": "./build/cli.js"
   },
   "engines": {
     "node": "24.22.0",
