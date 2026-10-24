@@ -1,6 +1,6 @@
 # 架构说明
 
-本页供修改执行和状态的维护者使用。CLI 使用 Node.js 内置 SQLite 保存批次、操作和观测。操作者的命令顺序见[日常发布](daily-cli-workflow.md)。
+本页供修改批次、执行和状态的维护者使用。CLI 使用 Node.js 内置 SQLite 保存批次、操作和观测。操作者的命令顺序见[发布应用更新](release-workflow.md)。
 
 | 代码 | 职责 |
 | --- | --- |
@@ -12,24 +12,26 @@
 | `src/channels/` | 六个渠道的独立 HTTP 协议实现 |
 | `src/credentials.ts` | 终端隐藏输入和可选的私有 JSON 文件输入 |
 
-## 发布顺序
+## 批次与提交
 
-`setup` 用可信 APK 确定包名和签名，并保存公开账号配置。`prepare` 检查每个 APK 的包名、签名和版本。检查通过后，CLI 把 APK 和小米图标复制到私有目录，再保存不可变批次。这两步不访问渠道。
+`setup` 用可信 APK 确定包名和签名，并保存公开账号配置。`prepare` 核对每份 APK 的包名、签名和版本，将 APK 与小米图标复制到私有目录，再保存不可变批次。这两步不访问渠道。
 
-`batch preflight` 只读查询远端应用。荣耀和 OPPO 的令牌申请属于账号生命周期操作，状态单独保存。`batch review` 把批次摘要、选定渠道、APK 摘要和预检摘要写入批准文件。`batch submit` 在第一个业务请求前复核全部选定产物和批准内容。
+`batch preflight` 只读查询远端账号和应用。荣耀、OPPO 的令牌申请属于账号生命周期操作，状态单独保存。`batch review` 将批次、所选渠道、APK 和预检的摘要写入批准文件。`batch submit` 在第一个业务请求前复核批准文件和全部选定产物。
 
-每个业务步骤先在 `operations` 表提交 `intent`，再发送一次请求。取得可验证回执后，立即把结果改为 `confirmed_applied`。上传授权的签名 URL 只保存在本机私有 SQLite 材料表，不进入报告。若进程中断或响应无法验证，日志保留 `intent` 或 `unknown`。
+每个业务步骤先向 `operations` 表提交 `intent`，再发送一次请求。取得可验证回执后，立即保存 `confirmed_applied`。上传授权的签名 URL 只保存在本机私有 SQLite 材料表，不进入报告。进程中断或响应无法验证时，日志保留 `intent` 或 `unknown`。
 
-`resume` 跳过已确认的步骤。遇到未决步骤时，它不会重发。`reconcile` 只读查询现有证据。当前六个渠道的响应丢失路径尚无足够依据自动解除阻塞；需要维护者核查。新批次也不能绕过同一渠道、账号和应用的未决写入。
+## 恢复与观测
 
-## 状态与本地数据
+`resume` 跳过已确认步骤，不重发未决步骤。`reconcile` 只读查询可关联的远端证据。当前六个渠道的响应丢失路径尚无足够依据自动解除阻塞；需要维护者核查。同一渠道、账号和应用的未决写入也会阻止新批次的冲突写入。
 
-执行、审核、上架和查询健康分别保存。渠道受理提交只确认执行。观测与本次版本无法关联时，信息进入 `channel_context`，不会增加已核实的审核或上架数量。
+执行、审核、上架和查询健康分别保存。渠道受理提交只确认执行。观测与本次版本无法关联时，信息进入 `channel_context`，不会增加已核实的审核或上架数量。字段的操作含义见[状态查询与恢复](status-and-recovery.md)。
 
-新版状态位于 `~/Library/Application Support/AndroidPublisherCLI/v2/`。SQLite 使用 WAL 和完全同步设置。文件与目录限制为当前用户访问。0.1.x Go 版状态没有自动迁移；旧目录仍由用户自行保管。
+## 私有数据
 
-终端输入的渠道密钥只留在当前进程内。可选的 `--credentials-file` 由用户在本机保存，CLI 要求文件属于当前用户且权限为 `0600`。令牌和短期上传授权进入私有状态库，以便同一账号按已记录结果继续使用。
+状态位于 `~/Library/Application Support/AndroidPublisherCLI/v2/`。SQLite 使用 WAL 和完全同步设置。文件与目录限制为当前用户访问。
 
-## 验收边界
+终端输入的渠道密钥只留在当前进程。可选的 `--credentials-file` 由用户在本机保存；CLI 要求文件属于当前用户，权限为 `0600`。令牌和短期上传授权进入私有状态库，以便同一账号按已记录结果继续使用。
 
-`test/recovery.test.mjs` 在 HTTP 请求返回后真实终止子进程，再检查重启后的意图和重复写入阻塞。`test/android.test.mjs` 构建并验签临时 APK。`test/channels.test.mjs` 使用合成响应覆盖六个渠道。测试不能证明真实账号权限或商店未公开行为。
+## 测试边界
+
+`test/recovery.test.mjs` 在 HTTP 请求返回后终止子进程，再检查重启后的意图和重复写入阻塞。`test/android.test.mjs` 构建并验签临时 APK。`test/channels.test.mjs` 用合成响应覆盖六个渠道。这些测试不证明真实账号权限或商店未公开行为。

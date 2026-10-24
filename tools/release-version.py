@@ -53,29 +53,19 @@ def manifest_version():
     return version
 
 
-def prepare(version, note):
+def prepare(version):
     current = manifest_version()
     if not greater(version, current):
         raise ValueError(f"New version must be greater than {current}.")
-    if not 10 <= len(note.strip()) <= 500 or "\n" in note or "\r" in note or \
-            any(ord(char) < 32 or ord(char) == 127 for char in note):
-        raise ValueError("Changelog note must be one line of 10–500 visible characters.")
-    changelog = ROOT / "CHANGELOG.md"
-    content = changelog.read_text()
-    if not content.startswith("# 更新记录\n\n") or f"\n## {version}\n" in content:
-        raise ValueError("Changelog heading is missing or the version already exists.")
     subprocess.run(["npm", "version", version, "--no-git-tag-version", "--ignore-scripts"], cwd=ROOT, check=True)
     if manifest_version() != version:
         raise ValueError("npm version did not update both manifests.")
-    changelog.write_text(f"# 更新记录\n\n## {version}\n\n- {note.strip()}\n\n" + content[len("# 更新记录\n\n"):])
 
 
 def check_tag(tag):
     version = manifest_version()
     if tag != f"v{version}":
         raise ValueError(f"Tag {tag} does not match package version v{version}.")
-    if f"\n## {version}\n" not in (ROOT / "CHANGELOG.md").read_text():
-        raise ValueError(f"Changelog has no entry for {version}.")
     return "next" if parse(version)[1] else "latest"
 
 
@@ -97,12 +87,12 @@ if __name__ == "__main__":
     try:
         if sys.argv[1:] == ["--self-test"]:
             self_test()
-        elif len(sys.argv) == 4 and sys.argv[1] == "--prepare":
-            prepare(sys.argv[2], sys.argv[3])
+        elif len(sys.argv) == 3 and sys.argv[1] == "--prepare":
+            prepare(sys.argv[2])
         elif len(sys.argv) == 3 and sys.argv[1] == "--check-tag":
             print(check_tag(sys.argv[2]))
         else:
-            raise ValueError("Usage: release-version.py --self-test | --prepare VERSION NOTE | --check-tag TAG")
+            raise ValueError("Usage: release-version.py --self-test | --prepare VERSION | --check-tag TAG")
     except (ValueError, subprocess.CalledProcessError) as error:
         print(error, file=sys.stderr)
         sys.exit(2)
