@@ -2,3 +2,13 @@ title = "Android Publisher CLI public source scan"
 
 [extend]
 useDefault = true
+
+# Historical synthetic regression token in the removed Go test. Keep this
+# exact path-and-value exception so scans can still cover the public history.
+[[allowlists]]
+targetRules = ["generic-api-key"]
+description = "Historical synthetic context sanitizer fixture"
+condition = "AND"
+paths = ['''(^|/)internal/protocol/context_test\.go$''']
+regexTarget = "secret"
+regexes = ['''^0123456789abcdef(?:0123456789abcdef)?$''']
