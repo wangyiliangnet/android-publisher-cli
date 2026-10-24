@@ -31,6 +31,6 @@ shasum -a 256 -c android-publisher-cli-0.2.0.tgz.sha256
 
 tarball 没有原生可执行文件，因此旧版 macOS `codesign`、公证和安装脚本不再适用。包内包含 MIT 许可证和[第三方声明](../THIRD_PARTY_NOTICES.md)。Node.js 与 Android 工具由使用者分别安装，并遵守各自许可。
 
-公开版本由 [publish-npm.yml](../.github/workflows/publish-npm.yml) 发布到 npm 注册表。工作流安装固定依赖、运行完整检查、打包、独立安装并核对 `android-release`，最后发布同一份 tarball。预发布版本使用 `next` 标签；正式版本使用 `latest`。真实渠道凭据和 APK 不能进入 npm 包、CI 或 GitHub 发布附件。
+首次预览版由维护者手工发布，用于占用 npm 包名并配置 Trusted Publisher。后续版本由 [publish-npm.yml](../.github/workflows/publish-npm.yml) 发布。工作流安装固定依赖、运行完整检查、打包、独立安装并核对 `android-release`，最后发布同一份 tarball。预发布版本使用 `next` 标签；正式版本使用 `latest`。真实渠道凭据和 APK 不能进入 npm 包、CI 或 GitHub 发布附件。
 
 同一版本号只能发布一次。内容改变时，先更新版本号与 `package-lock.json`，再生成新包。版本 PR、标签和 npm 发布的顺序见[版本发布](release-process.md)。
