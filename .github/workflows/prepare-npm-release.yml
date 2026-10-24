@@ -4,11 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: New SemVer without v (for example 0.2.0)
-        required: true
-        type: string
-      changelog_note:
-        description: One public changelog line (10–500 characters)
+        description: New SemVer without v (for example 0.2.1)
         required: true
         type: string
 
@@ -37,15 +33,14 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
 
-      - name: Prepare version and changelog
+      - name: Prepare version
         env:
           TARGET_VERSION: ${{ inputs.version }}
-          CHANGELOG_NOTE: ${{ inputs.changelog_note }}
         run: |
           test "$(node --version)" = "v$(cat .node-version)"
           test "$(npm --version)" = '11.19.1'
           python3 tools/release-version.py --self-test
-          python3 tools/release-version.py --prepare "$TARGET_VERSION" "$CHANGELOG_NOTE"
+          python3 tools/release-version.py --prepare "$TARGET_VERSION"
 
       - name: Open version pull request
         env:
@@ -60,9 +55,9 @@ jobs:
           git switch -c "$branch"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package.json package-lock.json CHANGELOG.md
+          git add package.json package-lock.json
           git commit -m "chore: prepare npm v${TARGET_VERSION}"
           git push origin "HEAD:refs/heads/$branch"
           gh pr create --base main --head "$branch" \
             --title "chore: prepare npm v${TARGET_VERSION}" \
-            --body 'Review the version, changelog, package contents and CI check. Merge this PR before creating the matching GitHub Release.'
+            --body '请核对版本、包内容和 CI 结果。合并后，为对应的 GitHub Release 编写说明并发布。'

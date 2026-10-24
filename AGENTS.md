@@ -4,8 +4,8 @@
 
 - 开发、测试或提交 PR：先读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 - 修改批次、执行、状态或恢复：先读 [架构](docs/architecture.md)。
-- 修改渠道协议：先读 [协议参考](docs/channels/protocol-evidence.md)。修改状态展示时，再读[自动查询说明](docs/channels/automatic-observation.md)。
-- 修改 npm 打包或版本交付：先读[构建与分发](docs/mac-cli-delivery.md)和[版本发布](docs/release-process.md)。
+- 修改渠道协议：先读[渠道协议](docs/channels/protocol-evidence.md)。修改状态展示时，再读[状态查询与恢复](docs/status-and-recovery.md)。
+- 修改 npm 打包或版本交付：先读[npm 包验收](docs/npm-package.md)和[CLI 版本发布](docs/npm-release.md)。
 
 ## 必须保持的约束
 
@@ -14,7 +14,7 @@
 - 分别记录执行、审核、上架和查询健康状态。未关联信息不能确认目标状态，也不能解除未决写入。
 - 真实商店变更需要覆盖应用、产物和渠道范围的授权。初始化、测试、CI、PR 或 npm 打包均不构成提审授权。
 - 凭据默认在终端交互输入。自动化输入文件必须属于当前用户，权限为 `0600`。令牌和上传授权只写入本机私有状态。真实凭据、APK、私钥、Cookie、签名 URL 和敏感响应不得进入 Git、issue、agent 提示词、包或普通日志。
-- 新版状态位于 `~/Library/Application Support/AndroidPublisherCLI/v2/`。测试和 CI 使用合成数据。渠道协议独立实现；复用第三方代码前核对许可证。
+- 本机状态位于 `~/Library/Application Support/AndroidPublisherCLI/v2/`。测试和 CI 使用合成数据。渠道协议独立实现；复用第三方代码前核对许可证。
 
 有 `.codegraph/` 索引时，定位代码先用 `codegraph explore`。没有该目录就直接使用仓库搜索工具。
 

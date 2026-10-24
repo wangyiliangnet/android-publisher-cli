@@ -1,33 +1,37 @@
 # Android 发布工具
 
-这个 CLI 使用 TypeScript 和 npm 构建。在 Apple Silicon Mac 上，它可向华为、荣耀、小米、OPPO、vivo 和应用宝提交已有应用的 Android 版本更新。发布规则固定为“审核通过后立即发布”。
+`android-release` 是运行在 Apple Silicon Mac 上的命令行工具。它为华为、荣耀、小米、OPPO、vivo 和应用宝提交已有应用的 Android 版本更新。发布策略固定为审核通过后立即发布。
 
-凭据默认在终端交互输入。CLI 不读取 macOS 钥匙串，也不保存用户输入的渠道密钥。发布批次、操作日志、短期令牌和上传授权保存在本机私有目录。真实渠道账号尚未完成新版实现的逐一验证；合成测试通过不代表账号具备发布权限。
+命令会先冻结 APK 和发布批次，再预检账号与应用。提交前，你需要审阅批准文件，并明确授权应用、产物和渠道范围。渠道受理提交不表示审核通过或公开上架。
 
-## 开始使用
+## 安装
 
-先安装 [`.node-version`](.node-version) 指定的 Node.js，以及 Android SDK Build Tools 和 JDK。安装与项目配置见[首次使用](docs/colleague-quickstart.md)。
+安装 [`.node-version`](.node-version) 指定的 Node.js，以及 Android SDK Build Tools 和 JDK。然后安装 npm 包：
 
 ```sh
-npm ci --ignore-scripts
-npm run build
-node build/cli.js doctor
+npm install --global android-publisher-cli
+android-release version --json
+android-release doctor
 ```
 
-运行 `android-release prepare` 后，按[日常发布](docs/daily-cli-workflow.md)完成预检、审阅、提交和查询。**真实提交会上传 APK 并提审。** 请先核对应用、产物和渠道范围的授权。
+`version` 应显示已安装的版本。`doctor` 的 `ready` 为 `true` 时，表示 CLI 找到了 APK 检查工具。工具缺失时，按[安装与配置](docs/getting-started.md)检查 SDK 和 JDK 路径。
 
-## 阅读入口
+## 文档
 
-| 任务 | 文档 |
+| 你要做的事 | 阅读 |
 | --- | --- |
-| 安装、配置、输入凭据 | [首次使用](docs/colleague-quickstart.md) |
-| 准备批次、提交、查询和恢复 | [日常发布](docs/daily-cli-workflow.md) |
-| 理解审核、上架和查询状态 | [自动查询说明](docs/channels/automatic-observation.md) |
+| 安装 CLI、配置应用、输入凭据 | [安装与配置](docs/getting-started.md) |
+| 准备批次、预检、审阅并提交 | [发布应用更新](docs/release-workflow.md) |
+| 查询审核与上架状态、处理中断 | [状态查询与恢复](docs/status-and-recovery.md) |
 | 修改代码、测试或提交 PR | [贡献指南](CONTRIBUTING.md) |
-| 查看状态机和渠道依据 | [架构](docs/architecture.md)、[协议参考](docs/channels/protocol-evidence.md) |
-| 打包或发布 npm 产物 | [构建与分发](docs/mac-cli-delivery.md)、[版本发布](docs/release-process.md) |
+| 理解执行约束和渠道接口 | [架构说明](docs/architecture.md)、[渠道协议](docs/channels/protocol-evidence.md) |
+| 检查 npm 包或发布 CLI 版本 | [npm 包验收](docs/npm-package.md)、[CLI 版本发布](docs/npm-release.md) |
 
-0.1.x Go 版的本地状态不会迁入新版。新版数据保存在 `~/Library/Application Support/AndroidPublisherCLI/v2/`。迁移范围见[更新记录](CHANGELOG.md)。
+## 数据与验证范围
+
+CLI 默认在终端读取渠道凭据。项目、冻结产物、操作日志、短期令牌和上传授权保存在 `~/Library/Application Support/AndroidPublisherCLI/v2/`。自动化凭据文件必须属于当前用户，权限为 `0600`。
+
+六个渠道通过了合成响应测试，真实账号仍需逐一验证。运行测试或安装 npm 包不授予渠道提审权限。真实提交前，先核对应用、APK 和渠道的授权范围。
 
 ## 许可证
 
