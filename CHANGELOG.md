@@ -1,5 +1,9 @@
 # 更新记录
 
+## 0.2.0
+
+- 首次 npm 正式发布，命令入口为 android-release，并提供自动版本与发布工作流。
+
 ## 0.2.0-dev
 
 - 将 CLI 重写为 TypeScript，使用 Node.js 24 和 npm 构建、测试及打包。

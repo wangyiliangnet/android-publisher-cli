@@ -1,6 +1,6 @@
 {
   "name": "android-publisher-cli",
-  "version": "0.2.0-dev",
+  "version": "0.2.0",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -13,7 +13,18 @@
     "registry": "https://registry.npmjs.org/",
     "access": "public"
   },
-  "files": ["build", "docs", ".node-version", "README.md", "CONTRIBUTING.md", "AGENTS.md", "CHANGELOG.md", "LICENSE", "LICENSE.zh-CN.md", "THIRD_PARTY_NOTICES.md"],
+  "files": [
+    "build",
+    "docs",
+    ".node-version",
+    "README.md",
+    "CONTRIBUTING.md",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "LICENSE.zh-CN.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "bin": {
     "android-release": "./build/cli.js"
   },
