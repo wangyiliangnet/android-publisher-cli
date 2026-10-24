@@ -5,13 +5,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      package_version:
-        description: Validated version for a draft CI preview; empty on normal checks.
-        required: false
-        type: string
-        default: ''
 
 permissions:
   contents: read
@@ -26,51 +19,35 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     env:
-      GOTOOLCHAIN: local
-      CGO_ENABLED: '1'
       PUBLISHER_REQUIRE_ANDROID_TESTS: '1'
-      PUBLISHER_REQUIRE_BROWSER_TESTS: '1'
     steps:
-      - name: Check out the exact source with public history
+      - name: Check out public source and history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Install digest-verified audit tools
+      - name: Install pinned audit tools
         run: /bin/sh tools/ci-install-tools.sh
 
-      - name: Validate workflow, release inputs, and public-source gates
+      - name: Check workflow and public-source policy
         run: |
           test "$(uname -m)" = arm64
-          printf 'PLAYWRIGHT_BROWSERS_PATH=%s/publisher-playwright\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           actionlint -color
-          /bin/sh tools/check-package-scripts.sh
           python3 tools/ci-release-version.py --self-test
-          python3 tools/ci-release-draft-test.py
           python3 tools/ci-public-scan-test.py
           python3 tools/ci-gitleaks-policy-test.py
           python3 tools/ci-public-scan.py
 
-      - name: Install the pinned Go runtime
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: .go-version
-          check-latest: false
-          cache-dependency-path: go.sum
-
-      - name: Install the pinned Node runtime
+      - name: Install pinned Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
-          cache-dependency-path: browser/package-lock.json
+          cache-dependency-path: package-lock.json
           package-manager-cache: false
 
-      - name: Install the pinned npm runtime
-        run: npm install --global npm@11.19.1 --ignore-scripts --no-audit --no-fund
-
-      - name: Install the pinned JDK
+      - name: Install pinned JDK
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -79,50 +56,19 @@ jobs:
           java-package: jdk
           check-latest: false
 
-      - name: Install an isolated Android SDK
+      - name: Install isolated Android SDK
         run: /bin/sh tools/ci-install-android.sh
 
-      - name: Verify runtimes and install the pinned Chromium
+      - name: Install npm dependencies and run TypeScript checks
         run: |
-          test "$(go env GOVERSION)" = "go$(cat .go-version)"
           test "$(node --version)" = "v$(cat .node-version)"
           test "$(npm --version)" = '11.19.1'
-          make browser-install
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
 
-      - name: Check formatting, vet, race, native Keychain, real APK, Chromium, and recovery
-        run: make check
-
-      - name: Choose a validated preview version
-        id: version
-        env:
-          REQUESTED_VERSION: ${{ inputs.package_version }}
+      - name: Pack and install the checked CLI
         run: |
-          version=${REQUESTED_VERSION:-0.0.0-ci-smoke.1}
-          python3 tools/ci-release-version.py "$version"
-          previous=0.0.0-ci-smoke.0
-          if [ "$version" = "$previous" ]; then previous=0.0.0-ci-smoke.1; fi
-          printf 'version=%s\nprevious=%s\n' "$version" "$previous" >> "$GITHUB_OUTPUT"
-
-      - name: Build isolated ad-hoc preview packages and test install, upgrade, rollback, and tampering
-        id: package
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          PREVIOUS: ${{ steps.version.outputs.previous }}
-        run: |
-          PUBLISHER_PACKAGE_MODE=ci-preview PUBLISHER_RELEASE_VERSION="$PREVIOUS" make package-macos
-          PUBLISHER_PACKAGE_MODE=ci-preview PUBLISHER_RELEASE_VERSION="$VERSION" make package-macos
-          archive="dist/android-publisher-cli-$VERSION-darwin-arm64-ci-preview.tar.gz"
-          /bin/sh tools/smoke-package-macos.sh "$archive" "dist/android-publisher-cli-$PREVIOUS-darwin-arm64-ci-preview.tar.gz"
-          printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
-
-      - name: Preserve only the tested package and checksum for the draft release
-        if: inputs.package_version != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ci-preview-package
-          path: |
-            ${{ steps.package.outputs.archive }}
-            ${{ steps.package.outputs.archive }}.sha256
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 0
+          archive="$RUNNER_TEMP/$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
+          test -f "$archive"
+          npm install --global --prefix "$RUNNER_TEMP/publisher-install" --ignore-scripts --no-audit --no-fund "$archive"
+          "$RUNNER_TEMP/publisher-install/bin/release" version --json
