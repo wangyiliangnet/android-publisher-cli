@@ -1,6 +1,6 @@
 # CLI 版本发布
 
-本页供发布 `android-publisher-cli` 到 npm 注册表的维护者使用。包内容和安装检查见 [npm 包验收](npm-package.md)。CLI 发版与 Android 应用提审分别授权。
+`android-publisher-cli` 通过版本 PR 和 GitHub Release 发布到 npm 注册表。先按 [npm 包验收](npm-package.md)检查交付物。CLI 发版与 Android 应用提审分别授权。
 
 ## 准备版本 PR
 

@@ -23,22 +23,70 @@ export function loadProject(id: string, root = dataRoot()): Project {
   return validateProject(readJSON(projectPath(root, id), 64 * 1024, true));
 }
 
-export function prepare(input: BatchInput, tools: AndroidTools, store: Store): Batch {
+export interface BatchPreview {
+  package_name: string;
+  version_name: string;
+  version_code: string;
+  signer_sha256: string;
+  apk_sha256: Partial<Record<Channel, string>>;
+}
+
+function batchInputs(input: BatchInput, store: Store): { project: Project; notes: string } {
   validateBatchInput(input);
   const project = loadProject(input.project_id, store.root);
   const selected = Object.keys(input.apks);
   if (selected.length !== project.channels.length || project.channels.some(ch => !selected.includes(ch.channel))) throw new Error('one APK is required for every configured channel');
   const notes = new TextDecoder('utf-8', { fatal: true }).decode(regularFile(input.release_notes_file, 64 * 1024));
   if ([...notes.trim()].length < 5 || [...notes].length > 500 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(notes)) throw new Error('release notes must have 5–500 characters');
+  return { project, notes };
+}
+
+function checkPackageAppId(channel: Channel, appId: string, packageName: string): void {
+  if (['xiaomi', 'oppo', 'vivo'].includes(channel) && appId !== packageName)
+    throw new Error(channel + ': configured app ID differs from APK package');
+}
+
+export function previewBatch(input: BatchInput, tools: AndroidTools, store: Store): BatchPreview {
+  const { project } = batchInputs(input, store);
+  let packageName = ''; let versionName = ''; let versionCode = ''; let signer = '';
+  const apkHashes: Partial<Record<Channel, string>> = {};
+  for (const config of project.channels) {
+    const apkPath = input.apks[config.channel]!;
+    const before = hashFile(apkPath);
+    const inspected = tools.inspect(apkPath);
+    const after = hashFile(apkPath);
+    if (before.sha256 !== after.sha256 || before.size !== after.size) throw new Error('APK changed while being inspected');
+    if (!packageName) {
+      packageName = inspected.package_name; versionName = inspected.version_name;
+      versionCode = inspected.version_code; signer = inspected.signer_sha256;
+    } else if (packageName !== inspected.package_name || versionName !== inspected.version_name ||
+               versionCode !== inspected.version_code || signer !== inspected.signer_sha256) {
+      throw new Error('all APKs must have the same package, version and signer');
+    }
+    checkPackageAppId(config.channel, config.app_id, inspected.package_name);
+    apkHashes[config.channel] = before.sha256;
+  }
+  return { package_name: packageName, version_name: versionName, version_code: versionCode,
+    signer_sha256: signer, apk_sha256: apkHashes };
+}
+
+export function prepare(input: BatchInput, tools: AndroidTools, store: Store, expected: BatchPreview): Batch {
+  const { project, notes } = batchInputs(input, store);
   const targets: FrozenTarget[] = [];
-  let versionName = ''; let versionCode = '';
+  let packageName = ''; let versionName = ''; let versionCode = ''; let signer = '';
   for (const config of project.channels) {
     const apkPath = input.apks[config.channel];
     if (!apkPath) throw new Error(`${config.channel}: APK path missing`);
     const artifact = inspectAndFreeze(tools, apkPath, store.root);
-    if (artifact.package_name !== project.package_name || artifact.signer_sha256 !== project.signer_sha256) throw new Error(`${config.channel}: APK package or signer differs from the approved project`);
-    if (!versionName) { versionName = artifact.version_name; versionCode = artifact.version_code; }
-    if (versionName !== artifact.version_name || versionCode !== artifact.version_code) throw new Error('all APKs must have the same version');
+    if (artifact.sha256 !== expected.apk_sha256[config.channel]) throw new Error('APK changed after confirmation');
+    if (!packageName) {
+      packageName = artifact.package_name; versionName = artifact.version_name;
+      versionCode = artifact.version_code; signer = artifact.signer_sha256;
+    } else if (packageName !== artifact.package_name || versionName !== artifact.version_name ||
+               versionCode !== artifact.version_code || signer !== artifact.signer_sha256) {
+      throw new Error('all APKs must have the same package, version and signer');
+    }
+    checkPackageAppId(config.channel, config.app_id, artifact.package_name);
     const target: FrozenTarget = { channel: config.channel, account: config.account, app_id: config.app_id,
       artifact, ...(config.client_id ? { client_id: config.client_id } : {}),
       ...(config.language_id ? { language_id: config.language_id } : {}),
@@ -52,9 +100,12 @@ export function prepare(input: BatchInput, tools: AndroidTools, store: Store): B
     }
     targets.push(target);
   }
+  if (expected.package_name !== packageName || expected.version_name !== versionName ||
+      expected.version_code !== versionCode || expected.signer_sha256 !== signer)
+    throw new Error('APK identity changed after confirmation');
   const body = { schema_version: 2 as const, batch_id: input.batch_id, project_id: project.project_id,
-    package_name: project.package_name, version_name: versionName, version_code: versionCode,
-    signer_sha256: project.signer_sha256, release_notes: notes, release_policy: 'after_approval' as const, targets };
+    package_name: packageName, version_name: versionName, version_code: versionCode,
+    signer_sha256: signer, release_notes: notes, release_policy: 'after_approval' as const, targets };
   const batch: Batch = { ...body, digest: digest(body), created_at: new Date().toISOString() };
   store.saveBatch(batch);
   return batch;

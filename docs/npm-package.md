@@ -1,6 +1,6 @@
 # npm 包验收
 
-本页供检查 npm 交付物的维护者使用。包内包含编译后的 JavaScript 和离线文档。运行时需要 [`.node-version`](../.node-version) 指定的 Node.js，以及单独安装的 Android SDK Build Tools 和 JDK。
+npm 包包含编译后的 JavaScript 和离线文档。验收时要检查实际 tarball 的文件清单与命令入口。运行时需要 [`.node-version`](../.node-version) 指定的 Node.js，以及单独安装的 Android SDK Build Tools 和 JDK。
 
 ## 构建与检查
 

@@ -4,8 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline/promises';
 import { AndroidTools } from './artifact.js';
-import { FileCredentials, PromptCredentials, type CredentialSource } from './credentials.js';
-import { loadProject, prepare, preflight, publicError, reconcile, report, review, saveProject, submit, refresh } from './engine.js';
+import { PromptCredentials } from './credentials.js';
+import { prepare, previewBatch, preflight, publicError, reconcile, report, review, saveProject, submit, refresh } from './engine.js';
 import { CHANNELS, type Channel, type Project, type ProjectChannel, isChannel, validateBatchInput, validateProject, validAbsolute, validId } from './model.js';
 import { readJSON, writePrivate } from './private-file.js';
 import { Store } from './state.js';
@@ -39,12 +39,6 @@ function channelsFlag(value: string | boolean | undefined): Channel[] | undefine
   if (!channels.length || new Set(channels).size !== channels.length || channels.some(ch => !isChannel(ch))) throw new Error('unknown or duplicate channel');
   return channels as Channel[];
 }
-function credentialSource(f: Flags): CredentialSource {
-  const file = f['credentials-file'];
-  if (!file) return new PromptCredentials();
-  if (typeof file !== 'string' || !validAbsolute(file)) throw new Error('credentials file must be an absolute path');
-  return new FileCredentials(file);
-}
 function output(value: unknown): void { process.stdout.write(`${JSON.stringify(value)}\n`); }
 function toolFlags(f: Flags): AndroidTools {
   const sdk = typeof f['sdk-root'] === 'string' ? f['sdk-root'] : undefined;
@@ -56,22 +50,20 @@ function help(): void {
   process.stdout.write(`Android Publisher CLI (TypeScript + npm)\n\n` +
     `android-release doctor [--sdk-root DIR] [--java-home DIR]\n` +
     `android-release inspect --apk /absolute/file.apk\n` +
-    `android-release setup --project ID --apk /absolute/trusted.apk\n` +
-    `android-release setup --file /absolute/project.json --apk /absolute/trusted.apk [--replace]\n` +
+    `android-release setup --project ID [--replace]\n` +
     `android-release prepare --file /absolute/batch.json\n` +
-    `android-release batch preflight --batch ID [--channels LIST] [--credentials-file FILE]\n` +
+    `android-release batch preflight --batch ID [--channels LIST]\n` +
     `android-release batch review --batch ID --file /absolute/approval.json [--channels LIST]\n` +
-    `android-release batch submit|resume --batch ID --approval FILE --approve-plan SHA256 [--credentials-file FILE]\n` +
-    `android-release batch status --batch ID [--refresh] [--credentials-file FILE]\n` +
-    `android-release batch reconcile --batch ID [--credentials-file FILE]\n` +
+    `android-release batch submit|resume --batch ID --approval FILE --approve-plan SHA256\n` +
+    `android-release batch status --batch ID [--refresh]\n` +
+    `android-release batch reconcile --batch ID\n` +
     `android-release batch report --batch ID --file /absolute/report.md\n` +
     `android-release history | protocols | version [--json]\n\n` +
-    `Credentials are requested in the terminal by default. A 0600 JSON file is supported for automation.\n`);
+    `Credentials are requested in the terminal. Multiline JSON and PEM inputs use private files.\n`);
 }
 
-async function setupWizard(projectId: string, apk: string, tools: AndroidTools): Promise<Project> {
-  if (!validId(projectId) || !validAbsolute(apk)) throw new Error('project ID or trusted APK path is invalid');
-  const inspected = tools.inspect(apk);
+async function setupWizard(projectId: string): Promise<Project> {
+  if (!validId(projectId)) throw new Error('project ID is invalid');
   const io = readline.createInterface({ input: process.stdin, output: process.stderr });
   const ask = async (label: string, fallback = ''): Promise<string> => {
     const typed = (await io.question(`${label}${fallback ? ` [${fallback}]` : ''}：`)).trim();
@@ -79,15 +71,12 @@ async function setupWizard(projectId: string, apk: string, tools: AndroidTools):
     return typed || fallback;
   };
   try {
-    process.stderr.write(`包名：${inspected.package_name}\n签名 SHA-256：${inspected.signer_sha256}\n`);
-    if ((await ask('确认信任这个包名和签名，输入 yes')) !== 'yes') throw new Error('setup canceled');
     const selection = channelsFlag(await ask('选择渠道，逗号分隔', CHANNELS.join(',')))!;
     const rows: ProjectChannel[] = [];
     for (const channel of selection) {
       process.stderr.write(`${channel}：只输入公开账号和应用标识。凭据在执行命令时另行输入。\n`);
       const account = await ask(channel === 'oppo' ? 'OPPO client_id（也作为本机账号名）' : '本机账号名', channel === 'oppo' ? '' : `${channel}-main`);
-      const appId = await ask('渠道应用 ID；小米、OPPO、vivo 使用包名',
-        ['xiaomi', 'oppo', 'vivo'].includes(channel) ? inspected.package_name : '');
+      const appId = await ask('渠道应用 ID；小米、OPPO、vivo 填包名');
       const row: ProjectChannel = { channel, account, app_id: appId };
       const clientLabels: Partial<Record<Channel, string>> = { honor: 'Honor client_id', xiaomi: '小米 userName',
         vivo: 'vivo access_key', tencent: '应用宝用户 uid' };
@@ -102,8 +91,7 @@ async function setupWizard(projectId: string, apk: string, tools: AndroidTools):
       }
       rows.push(row);
     }
-    const project: Project = { schema_version: 2, project_id: projectId, package_name: inspected.package_name,
-      signer_sha256: inspected.signer_sha256, channels: rows };
+    const project: Project = { schema_version: 2, project_id: projectId, channels: rows };
     validateProject(project);
     process.stderr.write(`项目摘要：${JSON.stringify(project)}\n`);
     if ((await ask('确认保存，输入 yes')) !== 'yes') throw new Error('setup canceled');
@@ -138,26 +126,29 @@ async function run(args: string[]): Promise<number> {
       note: 'Real account access and lost-response reconciliation require separate evidence.' })) }); return 0;
   }
   if (command === 'setup') {
-    const f = flags(args.slice(1), ['file', 'project', 'apk', 'sdk-root', 'java-home'], ['replace']);
-    const apk = requiredFlag(f, 'apk');
-    if (Boolean(f.file) === Boolean(f.project)) throw new Error('choose --file or --project');
-    const tools = toolFlags(f);
-    let project: Project;
-    if (f.file) {
-      project = validateProject(readJSON(requiredFlag(f, 'file'), 64 * 1024));
-      const trusted = tools.inspect(apk);
-      if (project.package_name !== trusted.package_name || project.signer_sha256 !== trusted.signer_sha256) throw new Error('project file differs from trusted APK');
-    } else project = await setupWizard(requiredFlag(f, 'project'), apk, tools);
+    const f = flags(args.slice(1), ['project'], ['replace']);
+    const project = await setupWizard(requiredFlag(f, 'project'));
     saveProject(project, undefined, Boolean(f.replace));
-    output({ schema_version: 2, project_id: project.project_id, package_name: project.package_name,
-      signer_sha256: project.signer_sha256, channels: project.channels.map(row => row.channel), saved: true });
+    output({ schema_version: 2, project_id: project.project_id,
+      channels: project.channels.map(row => row.channel), saved: true });
     return 0;
   }
   if (command === 'prepare') {
     const f = flags(args.slice(1), ['file', 'sdk-root', 'java-home']);
     const input = validateBatchInput(readJSON(requiredFlag(f, 'file'), 64 * 1024));
     const store = new Store();
-    try { const batch = prepare(input, toolFlags(f), store); output({ ...store.summary(batch.batch_id), effect: 'offline' }); return 0; }
+    try {
+      const tools = toolFlags(f);
+      const preview = previewBatch(input, tools, store);
+      process.stderr.write(`包名：${preview.package_name}\n版本名（versionName）：${preview.version_name}\n版本代码（versionCode）：${preview.version_code}\n`);
+      if (!process.stdin.isTTY) throw new Error('prepare confirmation requires a terminal');
+      const io = readline.createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        if ((await io.question('确认包名、版本名和版本代码，输入 yes 保存批次：')).trim() !== 'yes') throw new Error('prepare canceled');
+      } finally { io.close(); }
+      const batch = prepare(input, tools, store, preview);
+      output({ ...store.summary(batch.batch_id), effect: 'offline' }); return 0;
+    }
     finally { store.close(); }
   }
   if (command === 'history') {
@@ -170,23 +161,23 @@ async function run(args: string[]): Promise<number> {
     const action = args[1];
     if (!action) throw new Error('batch action is required');
     const values: Record<string, string[]> = {
-      preflight: ['batch', 'channels', 'credentials-file'],
+      preflight: ['batch', 'channels'],
       review: ['batch', 'channels', 'file'],
-      submit: ['batch', 'approval', 'approve-plan', 'credentials-file', 'sdk-root', 'java-home'],
-      resume: ['batch', 'approval', 'approve-plan', 'credentials-file', 'sdk-root', 'java-home'],
-      status: ['batch', 'channels', 'credentials-file'],
-      reconcile: ['batch', 'channels', 'credentials-file'],
+      submit: ['batch', 'approval', 'approve-plan', 'sdk-root', 'java-home'],
+      resume: ['batch', 'approval', 'approve-plan', 'sdk-root', 'java-home'],
+      status: ['batch', 'channels'],
+      reconcile: ['batch', 'channels'],
       report: ['batch', 'file'],
     };
     if (!values[action]) throw new Error('unsupported batch action');
     const f = flags(args.slice(2), values[action], action === 'status' ? ['refresh'] : []);
     const batchId = requiredFlag(f, 'batch');
     const selection = channelsFlag(f.channels);
-    if (action === 'status' && !f.refresh && (selection?.length || f['credentials-file'])) throw new Error('cached status does not use channels or credentials');
+    if (action === 'status' && !f.refresh && selection?.length) throw new Error('cached status does not use channels');
     const store = new Store();
     try {
       if (action === 'preflight') {
-        const result = await preflight(store, batchId, credentialSource(f), selection);
+        const result = await preflight(store, batchId, new PromptCredentials(), selection);
         output(result); return Object.keys(result.errors as object).length ? 3 : 0;
       }
       if (action === 'review') {
@@ -196,15 +187,15 @@ async function run(args: string[]): Promise<number> {
       if (action === 'submit' || action === 'resume') {
         if (selection?.length) throw new Error('channel selection is bound by the approval file');
         const result = await submit(store, batchId, requiredFlag(f, 'approval'), requiredFlag(f, 'approve-plan'),
-          credentialSource(f), toolFlags(f), action === 'resume');
+          new PromptCredentials(), toolFlags(f), action === 'resume');
         output(result); return Object.keys(result.errors as object).length ? 3 : 0;
       }
       if (action === 'status') {
-        const result = f.refresh ? await refresh(store, batchId, credentialSource(f), selection) : { ...store.summary(batchId), effect: 'cached' };
+        const result = f.refresh ? await refresh(store, batchId, new PromptCredentials(), selection) : { ...store.summary(batchId), effect: 'cached' };
         output(result); return 'errors' in result && Object.keys(result.errors as object).length ? 3 : 0;
       }
       if (action === 'reconcile') {
-        const result = await reconcile(store, batchId, credentialSource(f), selection);
+        const result = await reconcile(store, batchId, new PromptCredentials(), selection);
         output(result); return Object.keys(result.errors as object).length ? 3 : 0;
       }
       if (action === 'report') {
