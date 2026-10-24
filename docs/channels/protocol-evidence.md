@@ -1,6 +1,6 @@
 # 渠道协议与验证依据
 
-本页供修改渠道请求的维护者使用。新版 TypeScript 适配器只支持已有应用的版本更新，发布规则为 `after_approval`。`release protocols` 可在本机查看实现范围。
+本页供修改渠道请求的维护者使用。新版 TypeScript 适配器只支持已有应用的版本更新，发布规则为 `after_approval`。`android-release protocols` 可在本机查看实现范围。
 
 ## 当前能力
 

@@ -1,0 +1,68 @@
+name: Prepare npm release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New SemVer without v (for example 0.2.0)
+        required: true
+        type: string
+      changelog_note:
+        description: One public changelog line (10–500 characters)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-npm-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main' && github.repository == 'wangyiliangnet/android-publisher-cli'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Prepare version and changelog
+        env:
+          TARGET_VERSION: ${{ inputs.version }}
+          CHANGELOG_NOTE: ${{ inputs.changelog_note }}
+        run: |
+          test "$(node --version)" = "v$(cat .node-version)"
+          test "$(npm --version)" = '11.19.1'
+          python3 tools/release-version.py --self-test
+          python3 tools/release-version.py --prepare "$TARGET_VERSION" "$CHANGELOG_NOTE"
+
+      - name: Open version pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_VERSION: ${{ inputs.version }}
+        run: |
+          branch="codex/release-v${TARGET_VERSION}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "Version branch already exists: $branch" >&2
+            exit 1
+          fi
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore: prepare npm v${TARGET_VERSION}"
+          git push origin "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore: prepare npm v${TARGET_VERSION}" \
+            --body 'Review the version, changelog, package contents and CI check. Merge this PR before creating the matching GitHub Release.'

@@ -1,0 +1,92 @@
+name: Publish npm package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'wangyiliangnet/android-publisher-cli'
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      PUBLISHER_REQUIRE_ANDROID_TESTS: '1'
+    steps:
+      - name: Check out release source and history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag and main commit
+        id: version
+        env:
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD^{commit})" = "$(git rev-parse origin/main^{commit})"
+          dist_tag="$(python3 tools/release-version.py --check-tag "$GITHUB_REF_NAME")"
+          if [ "$dist_tag" = next ]; then
+            test "$RELEASE_PRERELEASE" = true
+          else
+            test "$RELEASE_PRERELEASE" = false
+          fi
+          echo "dist_tag=$dist_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned audit tools
+        run: /bin/sh tools/ci-install-tools.sh
+
+      - name: Check workflow and public-source policy
+        run: |
+          test "$(uname -m)" = arm64
+          actionlint -color
+          python3 tools/release-version.py --self-test
+          python3 tools/ci-public-scan-test.py
+          python3 tools/ci-gitleaks-policy-test.py
+          python3 tools/ci-public-scan.py
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+
+      - name: Install pinned JDK
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21.0.13+9'
+          architecture: aarch64
+          java-package: jdk
+          check-latest: false
+
+      - name: Install isolated Android SDK
+        run: /bin/sh tools/ci-install-android.sh
+
+      - name: Check and pack the CLI
+        id: pack
+        run: |
+          test "$(node --version)" = "v$(cat .node-version)"
+          test "$(npm --version)" = '11.19.1'
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+          archive="$RUNNER_TEMP/$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
+          test -f "$archive"
+          npm install --global --prefix "$RUNNER_TEMP/publisher-install" --ignore-scripts --no-audit --no-fund "$archive"
+          "$RUNNER_TEMP/publisher-install/bin/android-release" version --json
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Publish checked tarball to npm
+        env:
+          DIST_TAG: ${{ steps.version.outputs.dist_tag }}
+          ARCHIVE: ${{ steps.pack.outputs.archive }}
+        run: npm publish "$ARCHIVE" --access public --tag "$DIST_TAG" --registry https://registry.npmjs.org/

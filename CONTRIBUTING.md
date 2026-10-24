@@ -38,6 +38,8 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 
 CI 工作流见 [check.yml](https://github.com/wangyiliangnet/android-publisher-cli/blob/main/.github/workflows/check.yml)。它运行公开源码扫描、TypeScript 检查、合成协议测试、真实 APK 签名测试、子进程崩溃恢复测试，以及 npm 安装检查。CI 只使用临时身份和合成材料。
 
+CLI 版本通过 [Prepare npm release](.github/workflows/prepare-npm-release.yml) 创建 PR。合并后由维护者发布对应 GitHub Release，触发 [Publish npm package](.github/workflows/publish-npm.yml)。配置和核对步骤见[版本发布](docs/release-process.md)。这些工作流不会使用渠道账号或上传 APK。
+
 ## 文档归属
 
 | 内容 | 主要位置 |
