@@ -33,7 +33,8 @@ export function runtimeDiagnostic(root = dataRoot()): Record<string, unknown> {
   const platformOK = process.platform === 'darwin' && process.arch === 'arm64';
   let installed = false;
   try { verifyRuntime(root); installed = true; } catch { /* Diagnostic remains read only. */ }
-  return { schema_version: 2, ready: platformOK && installed, platform: process.platform, arch: process.arch,
+  const version = (JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+  return { schema_version: 2, version, runtime: process.version, ready: platformOK && installed, platform: process.platform, arch: process.arch,
     managed: true, checks: [
       { id: 'platform', status: platformOK ? 'ok' : 'failed', name: 'Apple Silicon Mac' },
       { id: 'apk_checker', status: installed ? 'ok' : 'missing', name: '工具自带的 APK 校验组件',

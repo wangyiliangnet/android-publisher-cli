@@ -65,7 +65,7 @@ export class CredentialVault {
         try { return validateCredentials(channel, JSON.parse(plaintext.toString('utf8'))); }
         finally { plaintext.fill(0); }
       } finally { key.fill(0); }
-    } catch { throw new Error(`${channel}：凭据无法解密，请在终端运行 android-release account update ${channel} ${account}`); }
+    } catch { throw new Error(`${channel}：凭据无法解密，请在本地 Web 的“账号与凭据”中更新，或运行 android-release account update ${channel} ${account}`); }
   }
   save(channel: Channel, account: string, credentials: CredentialSet): void {
     validateCredentials(channel, credentials);
@@ -96,7 +96,7 @@ export class CredentialVault {
     return { forChannel: async channel => {
       const account = accounts.find(row => row.channel === channel)?.account;
       const saved = account ? this.get(channel, account) : undefined;
-      if (!saved) throw new Error(`${channel}：请先在终端运行 android-release account update ${channel}${account ? ` ${account}` : ''}`);
+      if (!saved) throw new Error(`${channel}：请先在本地 Web 的“账号与凭据”中接入，或运行 android-release account update ${channel}${account ? ` ${account}` : ''}`);
       return saved;
     } };
   }

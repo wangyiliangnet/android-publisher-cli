@@ -5,6 +5,21 @@ const main = $('#main');
 const token = $('meta[name="publisher-token"]').content;
 const names = {huawei:'华为',honor:'荣耀',xiaomi:'小米',oppo:'OPPO',vivo:'vivo',tencent:'应用宝'};
 const channels = Object.keys(names);
+const credentialSpecs = {
+  huawei:[{key:'service_account_json',label:'服务账号 JSON',material:'JSON'}],
+  honor:[{key:'client_secret',label:'client_secret'}],
+  xiaomi:[{key:'api_secret',label:'API 密钥（api_secret）'},{key:'public_key_pem',label:'API 公钥或证书 PEM',material:'PEM'},{key:'test_account_json',label:'审核测试账号 JSON',material:'JSON',optional:true}],
+  oppo:[{key:'client_secret',label:'client_secret'}],
+  vivo:[{key:'access_secret',label:'access_secret'}],
+  tencent:[{key:'api_secret',label:'API 密钥（api_secret）'}],
+};
+const credentialHints = {
+  input:'凭据输入格式无效。请重新选择已配置的渠道账号，并填写对应材料。',
+  fields:'请填写当前渠道的必需凭据字段，同一字段只选择一种输入方式。',
+  file:'请使用属于当前用户、权限为 0600 的本机文件绝对路径，或切换到直接粘贴内容。',
+  format:'JSON 或 PEM 材料格式无效。请使用完整原文并保留原有换行，再重新输入。',
+  account:'账号尚未关联应用。请先保存应用和对应渠道的账号资料，再重新接入。',
+};
 const state = {view:'apps',apps:[],app:null,appDraft:null,releases:[],release:null,wizard:null,accounts:[],diagnostic:null,protocols:[],busy:false,progress:'',notice:null};
 let navigationPending = false;
 let toastTimer;
@@ -37,7 +52,7 @@ function toast(message) { const target=$('#toast'); target.textContent=message;t
 async function api(action, payload = {}) {
   const response = await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Publisher-Token':token},body:JSON.stringify({action,payload})});
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || '请求未完成，请重试。');
+  if (!response.ok) {const error=new Error(action==='accounts.update'?'凭据接入未完成。':result.error || '请求未完成，请重试。');if(action==='accounts.update'&&['input','fields','file','format','account'].includes(result.code))error.credentialIssue=result.code;throw error;}
   return result;
 }
 async function upload(file, purpose) {
@@ -91,7 +106,7 @@ function appBreadcrumb(app, suffix) {
 }
 function renderApp() {
   const app=state.app;if(!app)return notice();
-  let html=appBreadcrumb(app,'')+heading(esc(app.project_id)+' '+badge('本机'),esc(packageName(app)),btn(icon('shield')+' 检查渠道访问','check-app')+link(icon('plus')+' 新建发布','#/publish/'+encodeURIComponent(app.project_id),'primary'))+notice();
+  let html=appBreadcrumb(app,'')+heading(esc(app.project_id)+' '+badge('本机'),esc(packageName(app)),link(icon('shield')+' 账号与凭据','#/accounts')+btn(icon('check')+' 检查渠道访问','check-app')+link(icon('plus')+' 新建发布','#/publish/'+encodeURIComponent(app.project_id),'primary'))+notice();
   html+='<div class="tabs"><span class="tab active">'+icon('history')+' 发布记录 <span class="count">'+state.releases.length+'</span></span><a class="tab" href="#/app/'+encodeURIComponent(app.project_id)+'/settings">'+icon('settings')+' 应用配置</a></div>';
   if(!state.releases.length)return html+empty('发布你的第一个版本','为每个渠道选择 APK，再提供一份更新说明。工具会完成检查，并在上传前请你确认。',link('准备发布','#/publish/'+encodeURIComponent(app.project_id),'primary'));
   return html+releaseList(state.releases);
@@ -115,13 +130,13 @@ function renderAppForm() {
     const clientLabels={honor:'client_id',xiaomi:'userName',oppo:'client_id',vivo:'access_key',tencent:'uid'};
     html+='<section class="channel-config"><div class="channel-config-header"><label class="checkbox-label"><input type="checkbox" name="channel" value="'+channel+'" '+(saved?'checked':'')+'>'+esc(names[channel])+'</label><span class="hint">'+esc(channel)+'</span></div><div class="channel-fields" '+(!saved?'hidden':'')+'><div class="form-grid">'+field('账号备注',channel+'_account',row.account,'同一个渠道账号沿用相同备注。');
     if(['huawei','honor','tencent'].includes(channel))html+=field('商店 App ID',channel+'_app_id',row.app_id,'从该应用的商店后台复制。');
-    if(clientLabels[channel])html+=field(clientLabels[channel],channel+'_client_id',row.client_id||(channel==='oppo'?row.account:''),'渠道 API 的公开账号标识，密钥在终端输入。');
+    if(clientLabels[channel])html+=field(clientLabels[channel],channel+'_client_id',row.client_id||(channel==='oppo'?row.account:''),'渠道 API 的公开账号标识，密钥在账号与凭据中另行接入。');
     html+='</div>';
     if(channel==='xiaomi')html+='<div class="form-grid">'+field('应用图标绝对路径',channel+'_icon_path',row.icon_path||'','小米 API 需要此图标。可填写本机路径或选择图标文件。')+field('隐私政策地址',channel+'_privacy_url',row.privacy_url||'','HTTPS 网页地址，不带查询参数或片段。','url')+'</div><div class="field"><label class="btn small" for="xiaomi-icon">'+icon('upload')+' 选择图标文件</label><input type="file" id="xiaomi-icon" class="file-native" accept="image/png,image/jpeg"></div>';
     if(row.language_id)html+='<p class="small-muted">保留更新说明语言：'+esc(row.language_id)+'</p>';
     html+='</div></section>';
   }
-  html+='<div class="notice">'+icon('shield')+' 凭据通过终端输入并安全保存在本机。保存后，可在“账号与凭据”查看接入指引和凭据状态。</div><div class="form-actions"><button class="btn primary" type="submit">'+(editing?'保存应用配置':'创建应用配置')+'</button>'+link('取消',editing?'#/app/'+encodeURIComponent(app.project_id):'#/apps')+'</div></form>';
+  html+='<div class="notice">'+icon('shield')+' 保存后可在“账号与凭据”直接接入并验证密钥，日常发布会自动复用本机保存的凭据。</div><div class="form-actions"><button class="btn primary" type="submit">'+(editing?'保存应用配置':'创建应用配置')+'</button>'+link('取消',editing?'#/app/'+encodeURIComponent(app.project_id):'#/apps')+'</div></form>';
   return html;
 }
 function steps(current) {
@@ -224,17 +239,101 @@ function renderRelease() {
   return appBreadcrumb(app,'发布详情')+heading('版本 '+esc(release.version_name||release.version_code||''),esc(release.package_name||'')+' · '+formatDate(release.created_at))+notice()+renderReleaseDetails(release);
 }
 function renderAccounts() {
-  let html=heading('账号与凭据','CLI 与 Web 复用本机保存的渠道凭据。')+notice()+'<div class="notice">'+icon('terminal')+' 密钥通过终端隐藏输入。更新凭据后，返回此页面继续检查或发布。<br><code>android-release account update &lt;渠道&gt; &lt;账号备注&gt;</code></div>';
-  if(!state.accounts.length)return html+empty('暂无渠道账号','先创建应用并选择渠道。账号资料会随应用配置保存，密钥在终端接入。',link('新建应用','#/app/new','primary'));
-  html+='<div class="panel"><div class="panel-header">本机渠道账号</div><div class="table-wrap"><table><thead><tr><th>渠道 / 账号</th><th>凭据</th><th>引用应用</th><th>终端更新命令</th><th></th></tr></thead><tbody>';
-  for(const account of state.accounts)html+='<tr><td><strong>'+esc(names[account.channel])+'</strong><div class="cell-note">'+esc(account.account)+'</div></td><td>'+badge(account.saved?'已保存':'待接入',account.saved?'success':'warn')+'</td><td>'+account.apps.map(app=>'<a href="#/app/'+encodeURIComponent(app)+'">'+esc(app)+'</a>').join('、')+'</td><td><code>android-release account update '+esc(account.channel)+' '+esc(account.account)+'</code></td><td>'+btn('清除凭据','forget','small danger','data-channel="'+esc(account.channel)+'" data-account="'+esc(account.account)+'"')+'</td></tr>';
-  return html+'</tbody></table></div></div>';
+  let html=heading('账号与凭据','在此接入与更新渠道凭据，CLI 与 Web 自动复用本机保存的账号。')+notice()+'<div class="notice">'+icon('shield')+' 凭据验证通过后安全保存在本机。账号资料和发布进度由两个入口共用。</div>';
+  if(!state.accounts.length)return html+empty('暂无渠道账号','先创建应用并选择渠道，再接入对应账号的凭据。',link('新建应用','#/app/new','primary'));
+  html+='<div class="panel"><div class="panel-header">本机渠道账号</div><div class="table-wrap"><table><thead><tr><th>渠道 / 账号</th><th>凭据</th><th>引用应用</th><th>操作</th></tr></thead><tbody>';
+  for(const account of state.accounts)html+='<tr><td><strong>'+esc(names[account.channel])+'</strong><div class="cell-note">'+esc(account.account)+'</div></td><td>'+badge(account.saved?'已保存':'待接入',account.saved?'success':'warn')+'</td><td>'+account.apps.map(app=>'<a href="#/app/'+encodeURIComponent(app)+'">'+esc(app)+'</a>').join('、')+'</td><td><div class="flex wrap">'+btn(account.saved?'更新凭据':'接入凭据','credential-update','small'+(account.saved?'':' primary'),'data-channel="'+esc(account.channel)+'" data-account="'+esc(account.account)+'"')+btn('清除凭据','forget','small danger','data-channel="'+esc(account.channel)+'" data-account="'+esc(account.account)+'"')+'</div></td></tr>';
+  return html+'</tbody></table></div></div><p class="footnote">也可通过终端更新：<code>android-release account update &lt;渠道&gt; &lt;账号备注&gt;</code></p>';
+}
+function credentialField(spec) {
+  const key=spec.key,label=esc(spec.label),required=spec.optional?'（可选）':'<span class="required">*</span>';
+  if(!spec.material)return '<div class="field"><label for="credential-'+key+'">'+label+required+'</label><div class="credential-input"><input type="password" id="credential-'+key+'" data-credential-secret="'+key+'" autocomplete="new-password" spellcheck="false" autocapitalize="off" autocorrect="off" maxlength="65536"><button type="button" class="btn small" data-action="credential-reveal" data-control="credential-'+key+'" aria-pressed="false">显示内容</button></div></div>';
+  const content='<div class="field credential-material" data-credential-material="'+key+'"><label for="credential-mode-'+key+'">'+label+required+'</label><select id="credential-mode-'+key+'" data-credential-mode="'+key+'"><option value="file">使用本机私有文件路径</option><option value="text">直接粘贴 '+esc(spec.material)+' 内容</option></select><div class="credential-method" data-credential-file-panel="'+key+'"><label class="field-label" for="credential-file-'+key+'">本机绝对路径</label><input type="text" id="credential-file-'+key+'" data-credential-file="'+key+'" autocomplete="off" spellcheck="false" autocorrect="off" maxlength="4096" placeholder="/绝对路径/'+(spec.material==='PEM'?'public-key.pem':'account.json')+'"><span class="hint">文件须属于当前用户，权限为 0600。服务端会先检查权限，再读取材料。</span></div><div class="credential-method" data-credential-text-panel="'+key+'" hidden><div class="credential-label-row"><label class="field-label" for="credential-text-'+key+'">'+esc(spec.material)+' 内容</label><button type="button" class="btn small" data-action="credential-reveal" data-control="credential-text-'+key+'" aria-pressed="false">显示内容</button></div><textarea id="credential-text-'+key+'" class="credential-secret masked" data-credential-secret="'+key+'" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" maxlength="65536" rows="5" placeholder="粘贴完整 '+esc(spec.material)+' 内容，保留原有换行。"></textarea><span class="hint">内容默认遮蔽，可临时显示核对。提交或关闭后会清空输入。</span></div></div>';
+  return spec.optional?'<details class="credential-optional"><summary>'+label+'（可选）</summary>'+content+'</details>':content;
+}
+function syncCredentialModes(form) {
+  for(const select of form.querySelectorAll('[data-credential-mode]')){
+    const field=select.dataset.credentialMode;
+    form.querySelector('[data-credential-file-panel="'+field+'"]').hidden=select.value!=='file';
+    form.querySelector('[data-credential-text-panel="'+field+'"]').hidden=select.value!=='text';
+  }
+}
+function clearCredentialForm(form) {
+  if(!form)return;
+  for(const control of form.querySelectorAll('input,textarea')){control.value='';control.defaultValue='';control.removeAttribute('value');if(control.tagName==='TEXTAREA')control.textContent='';if(control.matches('input[data-credential-secret]'))control.type='password';if(control.tagName==='TEXTAREA')control.classList.add('masked');}
+  form.reset();syncCredentialModes(form);
+  for(const button of form.querySelectorAll('[data-action="credential-reveal"]')){button.textContent='显示内容';button.setAttribute('aria-pressed','false');}
+}
+function closeModal() {
+  const form=$('#credentials-form');
+  const channel=form?.dataset.channel,account=form?.dataset.account;
+  clearCredentialForm(form);
+  $('#modal').replaceChildren();
+  if(channel&&account)[...document.querySelectorAll('[data-action="credential-update"]')].find(button=>button.dataset.channel===channel&&button.dataset.account===account)?.focus();
+}
+function openCredentials(channel,account) {
+  closeModal();
+  $('#toast').hidden=true;clearTimeout(toastTimer);
+  const row=state.accounts.find(item=>item.channel===channel&&item.account===account);
+  if(!row||!credentialSpecs[channel])return;
+  $('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title" aria-describedby="credential-context"><div class="modal-heading"><h2 id="credential-title">'+esc(names[channel])+' · '+(row.saved?'更新凭据':'接入凭据')+'</h2><button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><div id="credential-context" class="credential-context"><div><span class="small-muted">渠道账号</span><strong>'+esc(account)+'</strong></div><div><span class="small-muted">关联应用</span><span>'+row.apps.map(esc).join('、')+'</span></div></div><p class="footnote">验证渠道访问权限后安全保存，后续发布会自动复用。应用配置、发布记录和查询结果共用同一账号。</p><form id="credentials-form" autocomplete="off" data-channel="'+esc(channel)+'" data-account="'+esc(account)+'"><div id="credential-error" class="notice error" role="alert" hidden></div>'+credentialSpecs[channel].map(credentialField).join('')+'<div id="credential-progress" class="progress-label" role="status" hidden><span class="spinner"></span>正在验证并保存凭据…</div><div class="form-actions"><button type="submit" class="btn primary" id="credential-save">验证并保存</button>'+btn('取消','close-modal')+'</div></form></div></section></div>';
+  const form=$('#credentials-form');
+  [...form.querySelectorAll('input,textarea,select')].find(control=>control.getClientRects().length)?.focus();
+}
+async function saveCredentials(form) {
+  if(state.busy)return;
+  let payload;
+  let failed=false;
+  let saved=false;
+  const rejectInput=code=>{const error=new Error('credential input');error.credentialIssue=code;throw error;};
+  const setError=text=>{if(!form.isConnected)return;const error=form.querySelector('#credential-error');error.textContent=text;error.hidden=false;};
+  try{
+    const credentials={},files={};
+    payload={channel:form.dataset.channel,account:form.dataset.account,credentials,files};
+    const specs=credentialSpecs[payload.channel];
+    if(!specs)rejectInput('account');
+    for(const spec of specs){
+      const file=spec.material&&form.querySelector('[data-credential-mode="'+spec.key+'"]').value==='file';
+      const control=file?form.querySelector('[data-credential-file="'+spec.key+'"]'):form.querySelector('[data-credential-secret="'+spec.key+'"]');
+      const value=file?control.value.trim():control.value;
+      if(!value.trim()){if(spec.optional)continue;rejectInput('fields');}
+      if(file&&!value.startsWith('/'))rejectInput('file');
+      const bytes=new TextEncoder().encode(value),tooLarge=bytes.length>(file?4096:65536);bytes.fill(0);
+      if(tooLarge)rejectInput('input');
+      (file?files:credentials)[spec.key]=value;
+    }
+    clearCredentialForm(form);
+    form.querySelector('#credential-error').hidden=true;
+    form.querySelector('#credential-progress').hidden=false;
+    for(const control of form.querySelectorAll('input,textarea,select,button'))control.disabled=true;
+    state.busy=true;state.progress='正在验证渠道凭据…';state.notice=null;render();
+    const result=await api('accounts.update',payload);
+    if(result.updated!==true)throw new Error('凭据保存尚未确认。');
+    saved=true;
+    closeModal();
+    state.accounts=(await api('accounts.list')).accounts||[];
+    toast('凭据已验证并安全保存。');
+  }catch(error){
+    failed=true;
+    clearCredentialForm(form);
+    const message=saved?'凭据已保存，账号列表刷新未完成，请刷新页面查看。':(credentialHints[error.credentialIssue]||'凭据验证或保存未完成。请检查材料、账号权限和钥匙串后重新输入。')+' 已输入内容已清空。';
+    if(form.isConnected)setError(message);else state.notice={type:saved?'warn':'error',text:saved?message:'凭据接入未完成，请重新打开账号凭据表单。'};
+  }finally{
+    if(payload){for(const values of [payload.credentials,payload.files])for(const key of Object.keys(values||{})){values[key]='';delete values[key];}}
+    state.busy=false;state.progress='';
+    if(form.isConnected){form.querySelector('#credential-progress').hidden=true;for(const control of form.querySelectorAll('input,textarea,select,button'))control.disabled=false;}
+    render();
+    if(failed&&form.isConnected)[...form.querySelectorAll('input,textarea,select')].find(control=>control.getClientRects().length)?.focus();
+    if(navigationPending){navigationPending=false;await navigate();}
+  }
 }
 function renderDoctor() {
   const result=state.diagnostic;
-  let html=heading('环境诊断','检查发布所需的本机组件，并给出可执行的修复方法。',btn(icon('refresh')+' 重新检查','doctor'))+notice();
+  let html=heading('环境诊断','检查发布所需的本机组件，直接安装或修复检查环境。',btn(icon('refresh')+' 重新检查','doctor')+btn(icon('upload')+' 安装 / 修复检查组件','doctor-repair',result?.ready?'':'primary'))+notice();
   if(!result)return html;
-  html+='<div class="notice '+(result.ready?'success':'warn')+'">'+(result.ready?'发布组件检查通过。可以准备应用更新。':'部分组件需要处理。请按下方提示修复后重新检查。')+'</div><div class="panel"><div class="panel-header">组件检查</div><ul class="check-list">';
+  html+='<div class="notice '+(result.ready?'success':'warn')+'">'+(result.ready?'发布组件检查通过。可以准备应用更新。':'部分组件需要处理。请按下方提示修复后重新检查。')+'</div>';
+  if(result.version||result.runtime||result.platform||result.arch)html+='<div class="panel"><div class="panel-header">版本与运行信息</div><div class="panel-body"><dl class="summary-grid"><div class="summary-item"><dt>CLI 版本</dt><dd>'+esc(result.version||'—')+'</dd></div><div class="summary-item"><dt>Node.js</dt><dd>'+esc(result.runtime||'—')+'</dd></div><div class="summary-item"><dt>运行平台</dt><dd>'+esc(result.platform||'—')+'</dd></div><div class="summary-item"><dt>CPU 架构</dt><dd>'+esc(result.arch||'—')+'</dd></div></dl></div></div>';
+  html+='<div class="panel"><div class="panel-header">组件检查</div><ul class="check-list">';
   for(const check of result.checks||[])html+='<li>'+badge(({ok:'通过',missing:'缺失',failed:'失败',blocked:'待检查'})[check.status]||check.status,check.status==='ok'?'success':'warn')+'<div class="check-content"><div class="check-title">'+esc(check.name||check.id)+'</div><div class="check-detail">'+esc(check.message||'')+(check.path?'<p class="mono">'+esc(check.path)+'</p>':'')+(check.fixes||[]).map(fix=>'<p>'+esc(fix)+'</p>').join('')+'</div></div></li>';
   return html+'</ul></div>';
 }
@@ -245,6 +344,7 @@ function renderProtocols() {
 }
 function newWizard(app) { return {appId:app.project_id,step:1,channels:app.channels.map(row=>row.channel),files:{},uploaded:{},notes:'',release:null,plan:null,errors:{}}; }
 async function navigate() {
+  closeModal();
   if(state.busy){navigationPending=true;return;}
   $('#toast').hidden=true;clearTimeout(toastTimer);
   state.busy=true;state.progress='正在加载…';state.notice=null;render();
@@ -309,6 +409,7 @@ async function continueRelease(existing) {
   await preflightRelease();
 }
 function openManual(channel) {
+  closeModal();
   const release=activeRelease();
   $('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-title"><div class="modal-heading"><h2 id="manual-title">记录 '+esc(names[channel])+' 人工核对</h2><button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><p class="small-muted">'+esc(release.package_name)+' · '+esc(release.version_name)+'（'+esc(release.version_code)+'）</p><div class="notice">请先在商店后台核对上述版本。此记录会标示为人工核对，未决请求仍须取得可验证证据后处理。</div><form id="manual-form" data-channel="'+channel+'"><div class="form-grid"><div class="field"><label for="manual-review">审核结果</label><select id="manual-review" name="review_state"><option value="unknown">尚未确认</option><option value="in_review">审核中</option><option value="approved">审核通过</option><option value="rejected">审核拒绝</option></select></div><div class="field"><label for="manual-live">上架结果</label><select id="manual-live" name="availability_state"><option value="unknown">尚未确认</option><option value="live">已上架</option><option value="not_live">未上架</option></select></div></div>'+field('核对时间','observed_at',localTime(),'','datetime-local',true)+field('结果来源','source','商店开发者后台','填写核对入口或本机证据说明。','text',true)+'<div class="field"><label for="manual-note">补充说明</label><textarea id="manual-note" name="note" maxlength="2000" placeholder="记录与本次版本关联的依据…" rows="3"></textarea></div><div class="form-actions"><button type="submit" class="btn primary">保存人工核对记录</button>'+btn('取消','close-modal')+'</div></form></div></section></div>';
   $('#manual-review').focus();
@@ -335,12 +436,13 @@ async function saveApp(form) {
   await work('正在保存应用配置…',async()=>{
     await api('apps.save',{app,replace:editing});
     state.apps=(await api('apps.list')).apps||[];state.app=selectedApp(app.project_id);state.view='app';state.releases=(await api('releases.list',{app_id:app.project_id})).releases||[];
-    state.notice={type:'success',text:'应用配置已保存。可在终端接入渠道凭据后检查访问权限。'};history.replaceState(null,'','#/app/'+encodeURIComponent(app.project_id));toast('应用配置已保存。');
+    state.notice={type:'success',text:'应用配置已保存。接下来可在“账号与凭据”直接接入各渠道，再检查访问权限。'};history.replaceState(null,'','#/app/'+encodeURIComponent(app.project_id));toast('应用配置已保存。');
   });
 }
 document.addEventListener('submit',event=>{
   event.preventDefault();const form=event.target;
   if(state.busy)return;
+  if(form.id==='credentials-form'){void saveCredentials(form);return;}
   if(form.id==='app-form')void saveApp(form).catch(error=>{state.notice={type:'error',text:error.message};render();});
   if(form.id==='manual-form'){
     const values=new FormData(form),channel=form.dataset.channel;
@@ -351,11 +453,13 @@ document.addEventListener('submit',event=>{
 });
 document.addEventListener('input',event=>{
   const target=event.target;
+  if(target.matches('[data-credential-secret],[data-credential-file]')){const error=target.closest('form').querySelector('#credential-error');if(error)error.hidden=true;}
   if(target.id==='app-search')document.querySelectorAll('[data-app-search]').forEach(card=>card.hidden=!card.dataset.appSearch.includes(target.value.toLowerCase()));
   if(target.id==='release-notes'&&state.wizard){state.wizard.notes=target.value;$('#notes-count').textContent=[...target.value].length+' / '+(state.wizard.channels.includes('vivo')?'200':'500')+' 字符';}
 });
 document.addEventListener('change',async event=>{
   const target=event.target;
+  if(target.dataset.credentialMode){const form=target.closest('form'),key=target.dataset.credentialMode;for(const control of form.querySelectorAll('[data-credential-file="'+key+'"],[data-credential-secret="'+key+'"]'))control.value='';const secret=form.querySelector('[data-credential-secret="'+key+'"]');secret.classList.add('masked');const reveal=form.querySelector('[data-control="'+secret.id+'"]');reveal.textContent='显示内容';reveal.setAttribute('aria-pressed','false');form.querySelector('#credential-error').hidden=true;syncCredentialModes(form);return;}
   if(target.name==='channel'){target.closest('.channel-config').querySelector('.channel-fields').hidden=!target.checked;return;}
   if(target.dataset.selectChannel){const wizard=state.wizard,channel=target.dataset.selectChannel;wizard.channels=target.checked?[...wizard.channels,channel]:wizard.channels.filter(item=>item!==channel);render();return;}
   if(target.dataset.reviewChannel){const wizard=state.wizard,channel=target.dataset.reviewChannel;wizard.channels=target.checked?[...wizard.channels,channel]:wizard.channels.filter(item=>item!==channel);wizard.plan=null;return;}
@@ -378,8 +482,10 @@ document.addEventListener('click',event=>{
   if(anchor&&state.busy){event.preventDefault();toast('当前操作正在执行，请稍候。');return;}
   const button=event.target.closest('[data-action]');if(!button)return;
   const action=button.dataset.action;
-  if(action==='close-modal'){$('#modal').innerHTML='';return;}
+  if(action==='close-modal'){closeModal();return;}
   if(state.busy)return;
+  if(action==='credential-update'){openCredentials(button.dataset.channel,button.dataset.account);return;}
+  if(action==='credential-reveal'){const control=document.getElementById(button.dataset.control);if(!control)return;const visible=button.getAttribute('aria-pressed')!=='true';if(control.tagName==='INPUT')control.type=visible?'text':'password';else control.classList.toggle('masked',!visible);button.setAttribute('aria-pressed',String(visible));button.textContent=visible?'隐藏内容':'显示内容';return;}
   if(action==='manual'){openManual(button.dataset.channel);return;}
   if(action==='back-preflight'){state.wizard.step=2;state.wizard.plan=null;render();return;}
   if(action==='forget'){
@@ -411,13 +517,16 @@ document.addEventListener('click',event=>{
     void work('正在读取可核对的远端证据…',async()=>{const result=await api('releases.reconcile',{release_id:activeRelease().batch_id});const release={...result.release,errors:result.errors||{}};if(state.view==='publish')state.wizard.release=release;else state.release=release;});return;
   }
   if(action==='doctor'){void work('正在检查本机组件…',async()=>{state.diagnostic=await api('doctor');});return;}
+  if(action==='doctor-repair'){void work('正在安装并校验 APK 检查组件，请稍候…',async()=>{state.diagnostic=await api('doctor.repair');toast(state.diagnostic.ready?'检查组件已安装，环境检查通过。':'检查组件安装完成，请查看剩余诊断事项。');});return;}
 });
 document.addEventListener('keydown',event=>{
-  if(event.key==='Escape')$('#modal').innerHTML='';
+  if(event.key==='Escape')closeModal();
   if((event.key==='Enter'||event.key===' ')&&event.target.classList.contains('file-picker')){event.preventDefault();document.getElementById(event.target.htmlFor).click();}
   const dialog=$('.modal-dialog');
-  if(event.key==='Tab'&&dialog){const controls=[...dialog.querySelectorAll('button,input,textarea,select,[tabindex]')].filter(control=>!control.disabled);const first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}
+  if(event.key==='Tab'&&dialog){const controls=[...dialog.querySelectorAll('button,input,textarea,select,[tabindex]')].filter(control=>!control.disabled&&control.getClientRects().length);const first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}
 });
+window.addEventListener('pagehide',closeModal);
+window.addEventListener('beforeunload',closeModal);
 window.addEventListener('hashchange',()=>void navigate());
 void navigate();
 `;

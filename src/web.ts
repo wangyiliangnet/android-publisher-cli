@@ -5,6 +5,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { dataRoot, privateDir } from './private-file.js';
 import { parseStrictJSON } from './model.js';
+import { CredentialInputError } from './credentials.js';
 import { page } from './web/page.js';
 import { clientScript } from './web/client.js';
 import { stylesheet } from './web/styles.js';
@@ -15,12 +16,12 @@ export interface WebBackend {
 
 const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list', 'releases.prepare',
   'releases.preflight', 'releases.review', 'releases.submit', 'releases.get', 'releases.manual', 'releases.reconcile',
-  'accounts.list', 'accounts.forget', 'doctor', 'protocols']);
+  'accounts.list', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols']);
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
 const actionErrors: Record<string, string> = {
   'apps.save': '应用配置未保存。请检查应用名称、包名、各渠道应用标识和小米图标资料。',
-  'apps.check': '渠道访问检查未完成。请检查本机凭据状态，并在终端更新需要重新接入的账号。',
+  'apps.check': '渠道访问检查未完成。请在“账号与凭据”中检查并更新需要重新接入的账号。',
   'releases.prepare': '发布材料准备未完成。请检查各渠道 APK 的包名、版本和签名是否一致，更新说明是否符合限制，并查看环境诊断。',
   'releases.preflight': '渠道预检未完成。请检查账号凭据和网络，修复后重新检查。',
   'releases.review': '提交摘要生成未完成。请重新检查渠道，查看是否有待核对请求，并确认本次选定范围。',
@@ -28,6 +29,8 @@ const actionErrors: Record<string, string> = {
   'releases.manual': '人工核对记录未保存。请核对渠道、结果来源和核对时间，再重新保存。',
   'releases.reconcile': '远端核对未完成。请保留本次记录，检查网络和账号权限后重试。',
   'accounts.forget': '本机凭据清除未完成。请解锁钥匙串，或在终端使用 account forget 重试。',
+  'accounts.update': '凭据更新未完成。请核对材料、账号权限、网络与钥匙串状态，并查看当前账号状态；存在未决令牌请求时，须先核对原请求。',
+  'doctor.repair': '检查组件安装或修复未完成。请检查网络和本机目录权限后重试。',
 };
 
 class RequestError extends Error {
@@ -51,14 +54,31 @@ function json(response: http.ServerResponse, status: number, value: unknown): vo
 async function readJSONBody(request: http.IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += bytes.length;
-    if (size > maxJSON) throw new RequestError(413, '请求内容过大。');
-    chunks.push(bytes);
+  let joined: Buffer | undefined;
+  try {
+    for await (const chunk of request) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(bytes);
+      size += bytes.length;
+      if (size > maxJSON) throw new RequestError(413, '请求内容过大。');
+    }
+    joined = Buffer.concat(chunks);
+    try { return parseStrictJSON(joined.toString('utf8')); }
+    catch { throw new RequestError(400, '请求 JSON 格式无效。'); }
+  } finally {
+    joined?.fill(0);
+    for (const chunk of chunks) chunk.fill(0);
   }
-  try { return parseStrictJSON(Buffer.concat(chunks).toString('utf8')); }
-  catch { throw new RequestError(400, '请求 JSON 格式无效。'); }
+}
+
+function clearCredentialPayload(payload: unknown): void {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+  const record = payload as Record<string, unknown>;
+  for (const key of ['credentials', 'files']) {
+    const value = record[key];
+    if (value && typeof value === 'object') for (const field of Object.keys(value)) delete (value as Record<string, unknown>)[field];
+    delete record[key];
+  }
 }
 
 async function upload(request: http.IncomingMessage, directory: string, icon = false): Promise<{ path: string; filename: string }> {
@@ -167,13 +187,20 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
         throw new RequestError(400, '操作无效。');
       const action = record.action;
       activeAction = action;
-      const value = await serial(() => backend.invoke(action, record.payload ?? {}));
-      json(response, 200, value);
+      try {
+        const value = await serial(() => backend.invoke(action, record.payload ?? {}));
+        if (action === 'accounts.update') {
+          if (!value || typeof value !== 'object' || (value as { updated?: unknown }).updated !== true) throw new Error('credential update was not confirmed');
+          json(response, 200, { updated: true });
+        } else json(response, 200, value);
+      } finally { if (action === 'accounts.update') clearCredentialPayload(record.payload); }
     })().catch(error => {
       if (response.headersSent) { response.destroy(); return; }
       // Vendor responses and arbitrary backend exceptions must not enter browser errors.
       json(response, error instanceof RequestError ? error.status : 400,
-        { error: error instanceof RequestError ? error.message : actionErrors[activeAction] ?? '操作未完成。请检查输入、账号凭据和环境诊断后重试。' });
+        { error: error instanceof RequestError || activeAction === 'accounts.update' && error instanceof CredentialInputError
+          ? error.message : actionErrors[activeAction] ?? '操作未完成。请检查输入、账号凭据和环境诊断后重试。',
+          ...(activeAction === 'accounts.update' && error instanceof CredentialInputError ? { code: error.code } : {}) });
       request.resume();
     });
   });

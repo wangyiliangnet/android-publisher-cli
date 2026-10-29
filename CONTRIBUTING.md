@@ -46,3 +46,13 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 渠道协议由本仓库独立实现，复用第三方代码前须核对许可证。真实账号、APK、私钥、Cookie、带签名的上传地址和原始响应不能进入 Git、issue 或构建产物。示例使用 `com.example.app`、`example.invalid` 等虚构资料。
 
 发布本工具的新版本，按 [CLI 发版流程](docs/npm-release.md)创建版本 PR 和 GitHub Release。代码测试、PR、打包或 CLI 发版均不构成 Android 应用提审授权。
+
+## 浏览器回归
+
+Web 凭据表单有独立的合成数据浏览器回归。普通检查跳过此项；本机已提供 Playwright 和 Chrome 时，可以启用：
+
+```sh
+PUBLISHER_BROWSER_TESTS=1 PUBLISHER_BROWSER_CHANNEL=chrome npm run check
+```
+
+Playwright 不在默认模块路径时，用 `PUBLISHER_PLAYWRIGHT_MODULE` 指定其 `index.mjs` 入口。回归使用新的浏览器上下文和临时状态，检查多行材料、输入清空、错误脱敏、重复提交和组件修复，不连接真实商店。

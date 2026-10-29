@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { type ArtifactInspector } from './artifact.js';
 import { channelAdapter } from './channels/index.js';
 import { protocols } from './channels/capabilities.js';
-import { type CredentialSet, type CredentialSource, validateCredentials } from './credentials.js';
+import { type CredentialSet, type CredentialSource, CredentialInputError, resolveCredentialInput, validateCredentials } from './credentials.js';
 import { loadProject, prepare, preflight, previewBatch, publicError, reconcile, refresh, review, saveProject, submit, validateSubmission } from './engine.js';
 import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, isChannel, validHash, validId, validPackage, validateProject } from './model.js';
 import { dataRoot, hashFile, privateDir, readJSON, writePrivate } from './private-file.js';
@@ -152,6 +152,13 @@ export class PublisherApplication {
     for (const app of apps) await this.checkChannel(app, app.channels.find(row => row.channel === channel && row.account === account)!, credentials);
     this.vault.save(channel, account, credentials);
   }
+  async updateAccountFromInput(channel: unknown, account: unknown, raw?: unknown, files?: unknown): Promise<void> {
+    if (!isChannel(channel) || !validId(account)) throw new CredentialInputError('input');
+    if (!this.accounts().some(row => row.channel === channel && row.account === account)) throw new CredentialInputError('account');
+    const credentials = resolveCredentialInput(channel, raw, files);
+    try { await this.updateAccount(channel, account, credentials); }
+    finally { for (const field of Object.keys(credentials)) delete credentials[field]; }
+  }
   accounts(): Array<{ channel: Channel; account: string; apps: string[]; saved: boolean }> {
     const result = new Map<string, { channel: Channel; account: string; apps: string[]; saved: boolean }>();
     for (const app of this.apps()) for (const row of app.channels) {
@@ -281,8 +288,13 @@ export class PublisherApplication {
         note: typeof p.note === 'string' ? p.note : '',
       }) };
       case 'accounts.list': return { accounts: this.accounts() };
+      case 'accounts.update':
+        if (Object.keys(p).some(key => !['channel', 'account', 'credentials', 'files'].includes(key))) throw new CredentialInputError('input');
+        await this.updateAccountFromInput(p.channel, p.account, p.credentials, p.files);
+        return { updated: true };
       case 'accounts.forget': this.forgetAccount(text('channel') as Channel, text('account')); return { forgotten: true };
       case 'doctor': return runtimeDiagnostic(this.root);
+      case 'doctor.repair': await ensureRuntime(this.root, this.options.progress); return runtimeDiagnostic(this.root);
       case 'protocols': return { channels: protocols() };
       default: throw new Error('unsupported application action');
     }

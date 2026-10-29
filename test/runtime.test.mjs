@@ -42,3 +42,14 @@ test('download timeouts produce a repair action and leave no partial installatio
   await assert.rejects(ensureRuntime(root), /doctor --repair/);
   assert.deepEqual(fs.readdirSync(path.join(root, 'runtime')), []);
 });
+
+test('shared Web repair returns ready components and version without terminal input', { skip: !process.env.PUBLISHER_MANAGED_TEST_ROOT }, async () => {
+  const { PublisherApplication } = await import('../build/application.js');
+  const app = new PublisherApplication({ root: process.env.PUBLISHER_MANAGED_TEST_ROOT });
+  try {
+    const result = await app.invoke('doctor.repair', {});
+    assert.equal(result.ready, true);
+    assert.equal(result.version, JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
+    assert.equal(result.runtime, process.version);
+  } finally { app.close(); }
+});

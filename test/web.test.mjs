@@ -192,3 +192,66 @@ test('Web uses the real shared application for APK-free setup and missing-creden
   assert.match(checks.errors.huawei, /account update/);
   assert.equal(remoteCalls, 0);
 });
+
+test('credential update is protected, strips backend output and clears request material', async t => {
+  let captured, received;
+  const app=await fixture(t,async(action,payload)=>{
+    assert.equal(action,'accounts.update');captured=payload;received=structuredClone(payload);
+    return {updated:true,credentials:payload.credentials,extra:'synthetic-private-output'};
+  });
+  const payload={channel:'xiaomi',account:'xiaomi-main',credentials:{api_secret:'synthetic'},files:{public_key_pem:'/synthetic/material.pem'}};
+  assert.equal((await app.action('accounts.update',payload,{Origin:'https://example.invalid'})).status,403);
+  assert.equal(captured,undefined);
+  const response=await app.action('accounts.update',payload);
+  assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+  assert.deepEqual(await response.json(),{updated:true});assert.deepEqual(received,payload);
+  assert.equal(captured.credentials,undefined);assert.equal(captured.files,undefined);
+});
+
+test('credential update failures expose only fixed input or verification errors', async t=>{
+  const {CredentialInputError}=await import('../build/credentials.js');
+  let retained;
+  const app=await fixture(t,async(_action,payload)=>{retained=payload;throw new Error(JSON.stringify(payload));});
+  const response=await app.action('accounts.update',{channel:'honor',account:'honor-main',credentials:{client_secret:'synthetic-private-input'}});
+  const text=await response.text();assert.equal(response.status,400);assert.doesNotMatch(text,/synthetic-private-input|client_secret/);
+  assert.equal(retained.credentials,undefined);
+  const invalid=await fixture(t,async()=>{throw new CredentialInputError('file');});
+  const bad=await invalid.action('accounts.update',{});assert.match((await bad.json()).error,/0600/);
+});
+
+test('component repair is available through the protected action route',async t=>{
+  const calls=[];const app=await fixture(t,async(action,payload)=>{calls.push({action,payload});return {ready:true,checks:[]};});
+  const response=await app.action('doctor.repair');assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{ready:true,checks:[]});assert.deepEqual(calls,[{action:'doctor.repair',payload:{}}]);
+});
+
+test('Web account onboarding uses the shared validator, retains previous credentials on rejection and writes ciphertext only',async t=>{
+  const {CredentialVault}=await import('../build/vault.js');
+  const root=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'publisher-web-credentials-'));
+  const keys=new Map();
+  const keyStore={get:id=>keys.has(id)?Buffer.from(keys.get(id)):undefined,put:(id,key)=>keys.set(id,Buffer.from(key)),delete:id=>keys.delete(id)};
+  const vault=new CredentialVault(root,keyStore);let reject=false;const calls=[];
+  const publisher=new PublisherApplication({root,vault,fetcher:async(url,init)=>{
+    const pathname=new URL(url).pathname;calls.push({method:init.method,path:pathname});
+    assert.ok(pathname.endsWith('query_app_detail'),'only the readonly connection check is allowed');
+    if(reject)throw new Error('synthetic-private-input');
+    return Response.json({ret:0,pkg_name:'com.example.app',version_code:1,app_name:'Synthetic',introduce:'Synthetic'});
+  }});
+  publisher.saveApp({schema_version:2,project_id:'synthetic',package_name:'com.example.app',channels:[{channel:'tencent',account:'tencent-main',app_id:'456',client_id:'synthetic-user'}]});
+  const web=await startWebServer(publisher,{root});
+  t.after(async()=>{await web.close();publisher.close();fs.rmSync(root,{recursive:true,force:true});});
+  const html=await(await fetch(web.url)).text(),token=html.match(/name="publisher-token" content="([^"]+)"/)[1];
+  const action=(action,payload={})=>fetch(web.url+'/api/action',{method:'POST',headers:{Origin:web.url,'Content-Type':'application/json','X-Publisher-Token':token},body:JSON.stringify({action,payload})});
+  const body={channel:'tencent',account:'tencent-main',credentials:{api_secret:'synthetic-private-input'}};
+  let response=await action('accounts.update',body);assert.equal(response.status,200);assert.deepEqual(await response.json(),{updated:true});
+  assert.equal(vault.get('tencent','tencent-main').api_secret,'synthetic-private-input');
+  const listing=await(await action('accounts.list')).json();assert.equal(listing.accounts[0].saved,true);
+  assert.ok(!JSON.stringify(listing).includes('synthetic-private-input'));
+  for(const filename of fs.readdirSync(path.join(root,'credentials'))){const file=path.join(root,'credentials',filename);assert.equal(fs.statSync(file).mode&0o777,0o600);assert.ok(!fs.readFileSync(file,'utf8').includes('synthetic-private-input'));}
+  reject=true;response=await action('accounts.update',{...body,credentials:{api_secret:'synthetic-replacement'}});
+  assert.equal(response.status,400);assert.doesNotMatch(await response.text(),/synthetic-private-input|synthetic-replacement/);
+  assert.equal(vault.get('tencent','tencent-main').api_secret,'synthetic-private-input');
+  assert.equal(publisher.store.batchIds().length,0);assert.equal(calls.length,2);
+  response=await action('accounts.update',{...body,credentials:{api_secret:'synthetic'},files:{service_account_json:'/synthetic.json'}});
+  assert.equal(response.status,400);assert.equal(calls.length,2);
+});

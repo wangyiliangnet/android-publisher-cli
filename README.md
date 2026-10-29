@@ -1,6 +1,6 @@
 # Android 发布工具
 
-`android-release` 把已签名的渠道 APK 提交到华为、荣耀、小米、OPPO、vivo 和应用宝中已有的应用，并追踪每个渠道的结果。面向在 Apple Silicon Mac 上直接使用终端的开发者和发布负责人。
+`android-release` 把已签名的渠道 APK 提交到华为、荣耀、小米、OPPO、vivo 和应用宝中已有的应用，并追踪每个渠道的结果。面向在 Apple Silicon Mac 上发版的开发者和发布负责人，提供终端和本地 Web 两种入口。
 
 首次保存应用资料和渠道账号。每次发版为各渠道明确指定 APK，提供一份更新说明。工具自动检查、展示提交摘要，确认一次后提交。默认选择应用已配置的全部渠道，审核通过后立即上架。
 
@@ -15,7 +15,7 @@ android-release publish demo
 android-release status demo
 ```
 
-首次配置无需 APK。账号凭据通过终端隐藏输入，验证后在本机安全保存，以后复用。APK 校验组件在首次发布时自动安装，无需配置 Android SDK 或 JDK。也可以提前运行 `android-release doctor --repair`。
+首次配置无需 APK。账号凭据可通过终端或本地 Web 表单录入，验证后在本机安全保存，以后复用。APK 校验组件在首次发布时自动安装，无需配置 Android SDK 或 JDK。也可以提前运行 `android-release doctor --repair`。
 
 日常发布也可直接指定文件，剩余渠道在交互中补齐：
 
@@ -36,7 +36,9 @@ android-release web
 
 命令启动 GitHub 风格的本地工作台，并打开浏览器。Web 和 CLI 共用应用、账号、冻结材料与发布记录，覆盖配置应用、逐渠道选包、预检、确认提交、继续发布、历史查询和人工核对。
 
-服务仅监听 `127.0.0.1`，按 Ctrl+C 停止。密钥仍在终端通过 `account update` 录入，Web 页面复用本机已保存的凭据。指定端口或手动打开浏览器时，使用 `web --port 3210 --no-open`。
+在“账号与凭据”选择“接入凭据”或“更新凭据”，填写密钥后点击“验证并保存”。JSON/PEM 支持本机私有文件路径或直接粘贴内容。验证成功后，CLI 和 Web 共用保存的凭据。环境诊断页也能直接安装或修复 APK 检查组件，并查看版本。
+
+服务仅监听 `127.0.0.1`，按 Ctrl+C 停止。指定端口或手动打开浏览器时，使用 `web --port 3210 --no-open`。
 
 ## 查看与继续
 
