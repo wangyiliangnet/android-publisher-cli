@@ -95,6 +95,81 @@ test('prepare rejects different APK identities across channels', () => {
   } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+function draft(root, channels, notes = 'Synthetic update notes', abis = ['arm64-v8a']) {
+  const apk = path.join(root, 'synthetic.apk');
+  const notesFile = path.join(root, 'notes.txt');
+  fs.writeFileSync(apk, 'synthetic APK');
+  fs.writeFileSync(notesFile, notes);
+  saveProject({ schema_version: 2, project_id: 'example', channels }, root);
+  const store = new Store(root);
+  let inspections = 0;
+  const tools = { inspect: () => {
+    inspections++;
+    return { signer_sha256: 'a'.repeat(64), package_name: 'com.example.app',
+      version_name: '2.0', version_code: '2', abis };
+  } };
+  return { store, tools, notesFile, inspections: () => inspections,
+    input: { schema_version: 2, batch_id: 'draft-batch', project_id: 'example', release_notes_file: notesFile,
+      apks: Object.fromEntries(channels.map(target => [target.channel, apk])) } };
+}
+
+test('a mixed-channel batch rejects vivo notes before inspecting or freezing any APK', () => {
+  const root = temp();
+  const { store, tools, input, inspections } = draft(root, [
+    { channel: 'tencent', account: 'example-account', app_id: '456', client_id: 'example-user' },
+    { channel: 'vivo', account: 'vivo-main', app_id: 'com.example.app', client_id: 'vivo-client' },
+  ], '更'.repeat(201));
+  try {
+    assert.throws(() => previewBatch(input, tools, store), /vivo.*200.*201/);
+    assert.equal(inspections(), 0);
+    assert.equal(fs.existsSync(path.join(root, 'artifacts')), false);
+    assert.deepEqual(store.batchIds(), []);
+  } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('prepare rechecks local limits if notes change after confirmation', () => {
+  const root = temp();
+  const { store, tools, input, notesFile, inspections } = draft(root, [
+    { channel: 'vivo', account: 'vivo-main', app_id: 'com.example.app', client_id: 'vivo-client' },
+  ], '😀'.repeat(200));
+  try {
+    const preview = previewBatch(input, tools, store);
+    fs.writeFileSync(notesFile, '😀'.repeat(201));
+    assert.throws(() => prepare(input, tools, store, preview), /vivo.*200.*201/);
+    assert.equal(inspections(), 1);
+    assert.equal(fs.existsSync(path.join(root, 'artifacts')), false);
+    assert.deepEqual(store.batchIds(), []);
+    fs.writeFileSync(notesFile, '😀'.repeat(200));
+    assert.equal([...prepare(input, tools, store, preview).release_notes].length, 200);
+  } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a missing Xiaomi icon is diagnosed before APK inspection or freezing', () => {
+  const root = temp();
+  const { store, tools, input, inspections } = draft(root, [
+    { channel: 'xiaomi', account: 'xiaomi-main', app_id: 'com.example.app', client_id: 'xiaomi-user',
+      icon_path: path.join(root, 'missing-icon.png'), privacy_url: 'https://example.invalid/privacy' },
+  ]);
+  try {
+    assert.throws(() => previewBatch(input, tools, store), /xiaomi.*icon_path/);
+    assert.equal(inspections(), 0);
+    assert.equal(fs.existsSync(path.join(root, 'artifacts')), false);
+    assert.deepEqual(store.batchIds(), []);
+  } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('Tencent APK architectures are validated before freezing', () => {
+  const root = temp();
+  const { store, tools, input } = draft(root, [
+    { channel: 'tencent', account: 'example-account', app_id: '456', client_id: 'example-user' },
+  ], 'Synthetic update notes', []);
+  try {
+    assert.throws(() => previewBatch(input, tools, store), /tencent.*CPU/);
+    assert.equal(fs.existsSync(path.join(root, 'artifacts')), false);
+    assert.deepEqual(store.batchIds(), []);
+  } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 function network(failSubmit = false) {
   const calls = [];
   const fetcher = async (url, options) => {

@@ -2,6 +2,7 @@ import { type Preflight } from '../model.js';
 import { md5File } from '../private-file.js';
 import { type Observation } from '../state.js';
 import { BaseAdapter, type StepReceipt } from './types.js';
+import { validateChannelArtifact } from './capabilities.js';
 import { check, decimal, hmacSign, required, str, unknown } from './http.js';
 
 interface Grant { url: string; serial: string; expires_at: string; }
@@ -68,7 +69,7 @@ export class TencentAdapter extends BaseAdapter {
     if (step === 'submit') {
       const serial = this.ref('upload');
       const abis = this.target.artifact.abis;
-      if (!abis.length || abis.some(abi => !['armeabi-v7a', 'x86', 'arm64-v8a', 'x86_64'].includes(abi))) throw new Error('Tencent APK ABI is missing or unsupported');
+      validateChannelArtifact(this.channel, this.target.artifact);
       const slot = abis.some(abi => ['armeabi-v7a', 'x86'].includes(abi)) ? '32' : '64';
       const fields: Record<string, string> = { pkg_name: this.batch.package_name, app_id: this.target.app_id,
         feature: this.batch.release_notes, deploy_type: '1', apk32_flag: '2', apk64_flag: '2',

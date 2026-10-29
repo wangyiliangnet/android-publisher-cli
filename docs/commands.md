@@ -34,11 +34,11 @@
 
 `LIST` 是逗号分隔的渠道名称，例如 `huawei,honor`。生成提交计划时选定渠道，提交与继续执行使用计划里的范围；这两个命令也支持 `--sdk-root DIR` 和 `--java-home DIR`。状态与中断处理见[查询结果与处理中断](status-and-recovery.md)。
 
-`android-release history` 列出已有发布批次。`android-release protocols` 显示各渠道的模拟接口测试与真实账号验证范围，字段含义见[渠道接口与验证范围](channels/protocol-evidence.md)。
+`android-release history` 列出已有发布批次。`android-release protocols [--json]` 显示各渠道的查询能力、更新说明上限和验证范围，字段含义见[渠道接口与验证范围](channels/protocol-evidence.md)。这一步离线运行。
 
 ## 输出与退出码
 
-`doctor` 默认输出中文诊断文字，`--json` 输出诊断对象。`version` 默认输出版本号，`--json` 输出版本对象。其他命令将 JSON 结果写到标准输出，交互提示写到标准错误。
+`doctor` 和 `protocols` 默认输出中文说明，`--json` 输出结构化结果。`version` 默认输出版本号，`--json` 输出版本对象。其他命令将 JSON 结果写到标准输出，交互提示写到标准错误。
 
 | 退出码 | 含义 | 下一步 |
 | --- | --- | --- |
@@ -46,4 +46,4 @@
 | `2` | 参数、配置、文件或环境错误 | 查看 `error`；环境问题运行 `doctor`，修复后重试 |
 | `3` | 至少一个渠道失败或结果未确定 | 查看 `errors` 与 `recovery_required`，先核对再继续 |
 
-`reconcile` 完成查询时也可能仍保留未确定结果的请求。判断是否可继续，要看 `recovery_required`，不能只看退出码。
+批次级 `recovery_required` 表示是否有渠道被未决令牌申请或发布请求阻塞。各渠道的 `recovery` 列出原因、操作记录和下一步。只核对部分渠道时，其他渠道的阻塞仍保留在汇总中；判断是否可继续，要同时查看渠道范围和恢复信息。

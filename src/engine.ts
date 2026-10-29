@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AndroidTools, inspectAndFreeze, verifyFrozen } from './artifact.js';
 import { channelAdapter } from './channels/index.js';
+import { validateChannelArtifact, validateReleaseNotes } from './channels/capabilities.js';
 import { ChannelError } from './channels/http.js';
 import { type ChannelAdapter } from './channels/types.js';
 import { type CredentialSource } from './credentials.js';
@@ -37,7 +38,13 @@ function batchInputs(input: BatchInput, store: Store): { project: Project; notes
   const selected = Object.keys(input.apks);
   if (selected.length !== project.channels.length || project.channels.some(ch => !selected.includes(ch.channel))) throw new Error('one APK is required for every configured channel');
   const notes = new TextDecoder('utf-8', { fatal: true }).decode(regularFile(input.release_notes_file, 64 * 1024));
-  if ([...notes.trim()].length < 5 || [...notes].length > 500 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(notes)) throw new Error('release notes must have 5–500 characters');
+  validateReleaseNotes(notes, project.channels.map(target => target.channel));
+  for (const target of project.channels) {
+    if (target.channel === 'xiaomi') {
+      try { hashFile(target.icon_path!); }
+      catch { throw new Error('小米（xiaomi）图标不可读取，请检查应用配置中的 icon_path 后重新 prepare'); }
+    }
+  }
   return { project, notes };
 }
 
@@ -64,6 +71,7 @@ export function previewBatch(input: BatchInput, tools: AndroidTools, store: Stor
       throw new Error('all APKs must have the same package, version and signer');
     }
     checkPackageAppId(config.channel, config.app_id, inspected.package_name);
+    validateChannelArtifact(config.channel, inspected);
     apkHashes[config.channel] = before.sha256;
   }
   return { package_name: packageName, version_name: versionName, version_code: versionCode,
@@ -87,6 +95,7 @@ export function prepare(input: BatchInput, tools: AndroidTools, store: Store, ex
       throw new Error('all APKs must have the same package, version and signer');
     }
     checkPackageAppId(config.channel, config.app_id, artifact.package_name);
+    validateChannelArtifact(config.channel, artifact);
     const target: FrozenTarget = { channel: config.channel, account: config.account, app_id: config.app_id,
       artifact, ...(config.client_id ? { client_id: config.client_id } : {}),
       ...(config.language_id ? { language_id: config.language_id } : {}),
@@ -269,8 +278,14 @@ export async function reconcile(store: Store, batchId: string, credentials: Cred
   const batch = store.loadBatch(batchId);
   const errors: Record<string, string> = {};
   for (const target of selectedTargets(batch, channels)) {
+    const tokenIssue = store.recovery(batchId, target.channel).find(issue => issue.kind === 'account_token');
+    if (tokenIssue) { errors[target.channel] = tokenIssue.message; continue; }
     const pending = store.operations(batchId, target.channel).filter(op => ['intent', 'unknown'].includes(op.effect));
-    if (!pending.length) continue;
+    if (!pending.length) {
+      const conflict = store.recovery(batchId, target.channel)[0];
+      if (conflict) errors[target.channel] = conflict.message;
+      continue;
+    }
     try {
       const secrets = await credentials.forChannel(target.channel);
       const adapter = channelAdapter(batch, target, secrets, store, fetcher);
@@ -296,6 +311,12 @@ export function report(store: Store, batchId: string): string {
     '| 渠道 | 执行 | 审核 | 上架 | 查询 |', '| --- | --- | --- | --- | --- |'];
   const targets = summary.targets as Array<Record<string, string>>;
   for (const row of targets) lines.push(`| ${row.channel} | ${row.execution_phase} | ${row.review_state} | ${row.availability_state} | ${row.query_status} |`);
+  for (const target of batch.targets) {
+    for (const issue of store.recovery(batchId, target.channel)) {
+      lines.push('', `${target.channel}：${issue.message}`, `记录：${issue.operation_id ?? '账号令牌'}；时间：${issue.recorded_at}。`,
+        `下一步：${issue.next_action}`);
+    }
+  }
   lines.push('', '本报告只记录本地回执和已关联的观测。审核与上架状态以各字段为准。', '');
   return lines.join('\n');
 }

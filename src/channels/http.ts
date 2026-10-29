@@ -16,10 +16,18 @@ export const ORIGINS: Record<Channel, string> = {
 export type RequestClass = 'read' | 'lifecycle' | 'write';
 export class ChannelError extends Error {
   constructor(readonly code: string, readonly effect: 'not_sent' | 'unknown' | 'confirmed_rejected' = 'unknown') {
-    super(`channel protocol: ${code} (${effect})`);
+    super(`channel protocol: ${code} (${effect})` +
+      (code === 'token_rejected' ? '；请核对 API 账号标识和密钥，修正后重试原命令' : ''));
   }
 }
 export const unknown = (): ChannelError => new ChannelError('missing_or_unrecognized_evidence');
+export function tokenRejected(channel: Channel, response: Record<string, unknown>): boolean {
+  if ('access_token' in response || response.data && typeof response.data === 'object' && 'access_token' in response.data) return false;
+  if (channel === 'honor') return typeof response.error === 'string' &&
+    ['invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client', 'unsupported_grant_type', 'invalid_scope'].includes(response.error);
+  if (channel === 'oppo') return typeof response.errno === 'number' && Number.isSafeInteger(response.errno) && response.errno !== 0;
+  return false;
+}
 export const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw unknown();
   return value as Record<string, unknown>;
@@ -93,7 +101,10 @@ export class ChannelHTTP {
         ...(body instanceof Readable ? { duplex: 'half' as const } : {}) });
     } catch { throw new ChannelError('network_or_timeout', q.class === 'read' ? 'not_sent' : 'unknown'); }
     finally { clearTimeout(timer); }
-    if (response.status < 200 || response.status > 299) throw new ChannelError('http_status', q.class === 'read' ? 'not_sent' : 'unknown');
+    const successful = response.status >= 200 && response.status <= 299;
+    // Token rejection bodies can prove that no token was issued. HTTP status alone cannot.
+    if (!successful && !(q.class === 'lifecycle' && [400, 401].includes(response.status)))
+      throw new ChannelError('http_status', q.class === 'read' ? 'not_sent' : 'unknown');
     if (q.rawUpload) {
       if (response.status !== 200) throw unknown();
       return {};
@@ -107,8 +118,14 @@ export class ChannelHTTP {
       if (size > 4 * 1024 * 1024) throw unknown();
       chunks.push(chunk);
     }
-    try { return object(parseStrictJSON(Buffer.concat(chunks).toString('utf8'))); }
+    let parsed: Record<string, unknown>;
+    try { parsed = object(parseStrictJSON(Buffer.concat(chunks).toString('utf8'))); }
     catch { throw unknown(); }
+    if (!successful) {
+      if (tokenRejected(this.channel, parsed)) throw new ChannelError('token_rejected', 'confirmed_rejected');
+      throw new ChannelError('http_status');
+    }
+    return parsed;
   }
 
   json(path: string, method: 'GET' | 'POST' | 'PUT', kind: RequestClass, value?: unknown, operationId?: string, headers?: Record<string, string>): Promise<Record<string, unknown>> {

@@ -1,8 +1,8 @@
 import { constants, createPrivateKey, sign as signBytes } from 'node:crypto';
-import { type Channel, digest, parseStrictJSON } from '../model.js';
+import { type Channel, parseStrictJSON } from '../model.js';
 import { type CredentialSet } from '../credentials.js';
-import { type Store } from '../state.js';
-import { ChannelHTTP, check, num, object, required, str, unknown } from './http.js';
+import { type Store, tokenScope } from '../state.js';
+import { ChannelError, ChannelHTTP, check, num, object, required, str, tokenRejected, unknown } from './http.js';
 
 function b64(value: string): string { return Buffer.from(value).toString('base64url'); }
 
@@ -25,26 +25,26 @@ export async function bearer(channel: Channel, account: string, clientId: string
   store: Store, http: ChannelHTTP): Promise<string> {
   if (channel === 'huawei') return huaweiJWT(credentials.service_account_json ?? '');
   if (channel !== 'honor' && channel !== 'oppo') return '';
-  const scope = digest([channel, account, clientId, 'token']);
+  const secret = credentials.client_secret ?? '';
+  required(clientId, secret);
+  const scope = tokenScope(channel, account, clientId);
   const existing = store.beginToken(scope);
   if (existing) return existing;
   try {
     let token: string; let expiry: number;
     if (channel === 'honor') {
-      const secret = credentials.client_secret ?? '';
-      required(clientId, secret);
       const form = Buffer.from(new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: secret }).toString());
       const response = await http.send({ method: 'POST', url: 'https://iam.developer.honor.com/auth/token', class: 'lifecycle',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8' }, body: form, size: form.length });
+      if (tokenRejected(channel, response)) throw new ChannelError('token_rejected', 'confirmed_rejected');
       token = str(response.access_token);
       const seconds = num(response.expires_in);
       if (!token || response.token_type !== 'Bearer' || seconds === null || seconds <= 30 || seconds > 86400) throw unknown();
       expiry = Date.now() + seconds * 1000;
     } else {
-      const secret = credentials.client_secret ?? '';
-      required(clientId, secret);
       const query = new URLSearchParams({ client_id: clientId, client_secret: secret });
       const response = await http.send({ method: 'GET', path: `/developer/v1/token?${query}`, class: 'lifecycle' });
+      if (tokenRejected(channel, response)) throw new ChannelError('token_rejected', 'confirmed_rejected');
       check(response, 'errno');
       const data = object(response.data);
       token = str(data.access_token);
@@ -55,7 +55,8 @@ export async function bearer(channel: Channel, account: string, clientId: string
     store.finishToken(scope, token, new Date(expiry).toISOString());
     return token;
   } catch (error) {
-    store.unknownToken(scope);
+    store.failToken(scope, error instanceof ChannelError && error.effect === 'not_sent' ? 'confirmed_not_applied'
+      : error instanceof ChannelError && error.effect === 'confirmed_rejected' ? 'confirmed_rejected' : 'unknown');
     throw error;
   }
 }

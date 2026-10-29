@@ -7,8 +7,9 @@ import { AndroidTools } from './artifact.js';
 import { diagnose, doctorText } from './doctor.js';
 import { configureProject } from './setup.js';
 import { PromptCredentials } from './credentials.js';
+import { protocols, protocolsText } from './channels/capabilities.js';
 import { loadProject, projectPath, prepare, previewBatch, preflight, publicError, reconcile, report, review, saveProject, submit, refresh } from './engine.js';
-import { CHANNELS, type Channel, type Project, isChannel, validateBatchInput, validAbsolute } from './model.js';
+import { type Channel, type Project, isChannel, validateBatchInput, validAbsolute } from './model.js';
 import { dataRoot, readJSON, writePrivate } from './private-file.js';
 import { Store } from './state.js';
 
@@ -61,7 +62,7 @@ function help(): void {
     `android-release batch reconcile --batch ID\n` +
     `android-release batch report --batch ID --file /absolute/report.md\n` +
     `android-release history\n` +
-    `android-release protocols\n` +
+    `android-release protocols [--json]  查看渠道能力、限制和验证范围\n` +
     `android-release version [--json]\n\n` +
     `setup 保存应用配置；prepare 保存本次 APK 和更新说明，生成发布批次。\n` +
     `batch review 生成供你核对的提交计划；submit 会上传 APK 并提审。\n` +
@@ -100,10 +101,10 @@ async function run(args: string[]): Promise<number> {
     output({ schema_version: 2, ...toolFlags(f).inspect(requiredFlag(f, 'apk')) }); return 0;
   }
   if (command === 'protocols') {
-    if (args.length !== 1) throw new Error('protocols takes no flags');
-    output({ schema_version: 2, channels: CHANNELS.map(channel => ({ channel,
-      protocol_mock_verified: true, account_verified: false, live_verified: false,
-      note: 'Real account access and lost-response reconciliation require separate evidence.' })) }); return 0;
+    const f = flags(args.slice(1), [], ['json']);
+    if (f.json) output({ schema_version: 2, channels: protocols() });
+    else process.stdout.write(protocolsText());
+    return 0;
   }
   if (command === 'setup') {
     const f = flags(args.slice(1), ['project'], ['replace']);

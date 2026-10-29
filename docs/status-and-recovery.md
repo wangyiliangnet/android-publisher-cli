@@ -20,9 +20,14 @@ android-release batch status --batch demo-1-0-0 --refresh
 | 审核是否通过 | `review_state`：`in_review` 审核中，`approved` 通过，`rejected` 拒绝，`unknown` 尚无法确认 |
 | 这个版本是否已上架 | `availability_state`：`live` 已上架，`not_live` 未上架，`unknown` 尚无法确认 |
 | 最近一次查询是否成功 | `query_status`：`never` 尚未查询，`ok` 查询成功，`failed` 查询失败；`last_success_at` 是最近成功时间 |
-| 是否有操作不能直接重试 | `recovery_required: true` 表示有已发出但结果未确定的请求 |
+| 是否有操作不能直接重试 | `recovery_required: true` 表示有未决令牌申请或发布请求；同范围其他批次的未决写入也会阻塞当前批次 |
+| 为什么阻塞、下一步做什么 | `recovery` 列出阻塞类型、时间、操作步骤、原批次与 `next_action` |
+| 最近一次令牌申请怎样结束 | 荣耀、OPPO 的 `account_token_status`：`confirmed_applied` 已取得令牌，`confirmed_rejected` 已被拒绝，`confirmed_not_applied` 未发送，`intent` 或 `unknown` 结果未确定 |
+| 查询接口能否确认本次状态 | `query_support.review` 与 `query_support.availability` 分别表示当前实现的审核与上架查询能力 |
 
 `accepted_targets`、`approved_targets` 和 `live_targets` 分别统计受理、审核通过和上架的渠道数。`total_targets` 是整个批次的渠道数，只提交部分渠道时，汇总不会自动缩小到所选范围。
+
+批次级 `recovery_required` 汇总全部渠道的阻塞情况。`query_support` 为 `false` 时，需要到后台核对该项结果。它与查询是否成功分别记录，`query_status: ok` 不代表工具能确认审核或上架。
 
 查询失败时先看 `last_error`，检查网络、账号密钥和权限后再次刷新。已有审核与上架记录会保留，`last_success_at` 也保留原值，因此要同时看查询时间和 `query_status`。查询失败不代表审核被拒绝。
 
@@ -43,14 +48,27 @@ CLI 必须确认商店返回的结果属于本次版本，才会更新审核或�
 
 ## 报错或中断后继续
 
-先查看已有记录，再查询是否能确定中断请求的结果：
+先查看已有记录。这一步离线运行，不需要密钥：
 
 ```sh
 android-release batch status --batch demo-1-0-0
-android-release batch reconcile --batch demo-1-0-0
 ```
 
-`reconcile` 是中断核对命令，需要渠道密钥，只读取远端数据。请求发出后丢失响应，商店可能已经执行。当前六个渠道尚不能凭现有接口自动确定这类请求的结果，因此核对后仍可能保留阻塞。
+按各渠道的 `recovery` 判断下一步：
+
+| 情况 | 处理方法 |
+| --- | --- |
+| `account_token_status: confirmed_rejected` 或 `confirmed_not_applied`，且没有其他阻塞 | 核对 API 账号标识和密钥，修正后重试原命令。无需新建批次或删除状态 |
+| `recovery` 中有 `kind: account_token` | 令牌申请结果未确定，继续阻止申请。在后台核对 API 账号，并联系维护者检查本机令牌记录；`reconcile` 会报告阻塞，不重复申请令牌 |
+| `recovery` 中有 `kind: business_write` | 查看 `batch_id`、`step` 和 `operation_id`，执行 `next_action` 中指向原批次的核对命令；阻塞可能来自另一个批次 |
+
+例如，核对华为的原批次：
+
+```sh
+android-release batch reconcile --batch demo-1-0-0 --channels huawei
+```
+
+`reconcile` 只读取远端发布数据。需要查询商店时会提示输入渠道密钥。请求发出后丢失响应，商店可能已经执行。当前六个渠道尚不能凭现有接口自动确定这类写入的结果，因此核对后仍可能保留阻塞。
 
 出现 `recovery_required: true` 时，请在渠道后台核对具体版本与操作，并交给维护者检查。保留原提交计划和本机记录。不要重新建批次、更换账号备注或删除状态库来绕过阻塞，这可能造成重复提交。
 
@@ -66,7 +84,7 @@ android-release batch resume --batch demo-1-0-0 \
 
 若提示 `remote baseline changed after review`，说明核对计划后商店资料发生了变化。在没有未确定请求的情况下，重新预检、生成新计划文件并核对，再决定是否继续。
 
-退出码 `0` 表示命令完成；`2` 表示参数、文件或环境等错误；`3` 表示部分渠道失败或结果未确定。渠道错误详情见输出中的 `errors`。`reconcile` 的退出码为 `0` 也可能仍需处理 `recovery_required`；退出码不表示审核通过或已经上架。
+退出码 `0` 表示命令完成；`2` 表示参数、文件或环境等错误；`3` 表示部分渠道失败或结果未确定。渠道错误详情见输出中的 `errors`。`reconcile` 对所选渠道仍未解决的阻塞返回 `3`；其他渠道可能仍需处理 `recovery_required`。退出码不表示审核通过或已经上架。
 
 ## 导出记录
 
@@ -76,7 +94,7 @@ android-release batch report --batch demo-1-0-0 \
 android-release history
 ```
 
-`report` 把当前保存的批次状态导出为 Markdown，不主动刷新商店结果。文件的父目录须已存在，文件名须尚未使用。`history` 列出本机保存的全部发布批次，供你找回批次名。
+`report` 把当前保存的批次状态和阻塞诊断导出为 Markdown，不主动刷新商店结果。诊断包含操作编号、时间和下一步，不含令牌或上传授权。文件的父目录须已存在，文件名须尚未使用。`history` 列出本机保存的全部发布批次，供你找回批次名。
 
 报告不含密钥、令牌或带签名的上传地址，但含包名、版本和发布进度，分享前请检查。
 
