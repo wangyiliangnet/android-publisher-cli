@@ -263,7 +263,7 @@ export class Store {
   accountToken(target: FrozenTarget): { effect: Effect; updated_at: string } | undefined {
     if (!['honor', 'oppo'].includes(target.channel)) return undefined;
     return row(this.db, 'SELECT effect,updated_at FROM token_leases WHERE scope=?',
-      tokenScope(target.channel, target.account, target.channel === 'oppo' ? target.account : target.client_id ?? ''));
+      tokenScope(target.channel, target.account, target.client_id ?? (target.channel === 'oppo' ? target.account : '')));
   }
 
   recovery(id: string, channel: Channel): RecoveryIssue[] {

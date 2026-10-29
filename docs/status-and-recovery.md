@@ -58,11 +58,13 @@ android-release batch status --batch demo-1-0-0
 
 | 情况 | 处理方法 |
 | --- | --- |
-| `account_token_status: confirmed_rejected` 或 `confirmed_not_applied`，且没有其他阻塞 | 核对 API 账号标识和密钥，修正后重试原命令。无需新建批次或删除状态 |
+| `account_token_status: confirmed_rejected` 或 `confirmed_not_applied`，且没有其他阻塞 | 密钥或商店权限修正后可重试原批次。若账号标识有误，按下文更正冻结内容 |
 | `recovery` 中有 `kind: account_token` | 令牌申请结果未确定，继续阻止申请。在后台核对 API 账号，并联系维护者检查本机令牌记录；`reconcile` 会报告阻塞，不重复申请令牌 |
 | `recovery` 中有 `kind: business_write` | 查看 `batch_id`、`step` 和 `operation_id`，执行 `next_action` 中指向原批次的核对命令；阻塞可能来自另一个批次 |
 
-例如，核对华为的原批次：
+账号标识、应用编号和 APK 已随批次冻结。更正这些内容前，先确认相关渠道没有未决请求。然后修改应用配置或准备正确的 APK，用新的 `batch_id` [创建批次](release-workflow.md#检查并保存这次发布)，重新预检并核对提交计划。修改应用配置不会改变原批次。
+
+有未决业务请求时，按 `next_action` 核对原批次。例如，核对华为：
 
 ```sh
 android-release batch reconcile --batch demo-1-0-0 --channels huawei

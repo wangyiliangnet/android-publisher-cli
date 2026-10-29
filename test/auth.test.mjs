@@ -6,12 +6,13 @@ import path from 'node:path';
 import { digest } from '../build/model.js';
 import { Store, tokenScope } from '../build/state.js';
 import { bearer } from '../build/channels/auth.js';
+import { OPPOAdapter } from '../build/channels/oppo.js';
 import { ChannelError, ChannelHTTP } from '../build/channels/http.js';
 import { reconcile, report } from '../build/engine.js';
 
-function fixture(channel) {
+function fixture(channel, account = 'synthetic-client') {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-auth-'));
-  const target = { channel, account: 'synthetic-client', app_id: 'com.example.app', client_id: 'synthetic-client',
+  const target = { channel, account, app_id: 'com.example.app', client_id: 'synthetic-client',
     artifact: { path: path.join(root, 'fixture.apk'), filename: 'fixture.apk', sha256: 'a'.repeat(64), size: 10,
       signer_sha256: 'b'.repeat(64), package_name: 'com.example.app', version_name: '2.0', version_code: '2', abis: ['arm64-v8a'] } };
   const body = { schema_version: 2, batch_id: 'auth-batch', project_id: 'synthetic', package_name: 'com.example.app',
@@ -27,6 +28,39 @@ function issued(channel) {
     ? { token_type: 'Bearer', expires_in: 3600, access_token: 'synthetic-token' }
     : { errno: 0, data: { access_token: 'synthetic-token', expire_in: Math.floor(Date.now() / 1000) + 3600 } });
 }
+
+test('OPPO recovery finds a lost token response when the account name differs from the client ID', async () => {
+  const fixtureValue = fixture('oppo', 'synthetic-local-account');
+  const { root, target } = fixtureValue;
+  let store = fixtureValue.store;
+  let calls = 0;
+  let requestedClientId;
+  const secrets = { client_secret: 'synthetic-secret' };
+  const fetcher = async url => {
+    calls++;
+    requestedClientId = new URL(url).searchParams.get('client_id');
+    throw new Error('response lost');
+  };
+  const adapter = () => new OPPOAdapter(store.loadBatch('auth-batch'), target, secrets, store, fetcher);
+  try {
+    await assert.rejects(adapter().preflight(), /network_or_timeout/);
+    assert.equal(requestedClientId, target.client_id);
+    store.close();
+    store = new Store(root);
+    const summary = store.summary('auth-batch');
+    assert.equal(summary.recovery_required, true);
+    assert.equal(summary.targets[0].account_token_status, 'unknown');
+    assert.equal(summary.targets[0].recovery[0].kind, 'account_token');
+    const result = await reconcile(store, 'auth-batch', {
+      forChannel: () => { throw new Error('must not prompt for credentials'); },
+    });
+    assert.match(result.errors.oppo, /令牌申请结果未确定/);
+    assert.match(report(store, 'auth-batch'), /账号令牌申请结果未确定/);
+    await assert.rejects(adapter().preflight(), /token result is unresolved/);
+    assert.equal(calls, 1);
+    assert.doesNotMatch(JSON.stringify(summary) + report(store, 'auth-batch'), /synthetic-secret/);
+  } finally { store.close(); fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 for (const [channel, status, response] of [
   ['oppo', 200, { errno: 1001 }],

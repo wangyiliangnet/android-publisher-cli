@@ -14,7 +14,7 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 npm pack --dry-run --json
 ```
 
-前两步安装锁定依赖并完成类型检查、构建和测试。最后一条命令只列出将打包的文件，不生成压缩包。清单应包含 `build/`、`docs/`、`README.md`、许可证和 `package.json`，不含密钥、APK、状态库、私钥或个人本机路径。npm 包没有安装脚本。
+前两步安装锁定依赖并完成类型检查、构建和测试。最后一条命令只列出将打包的文件，不生成压缩包。清单应包含 `build/`、`docs/`、`README.md`、`GLOSSARY.md`、许可证和 `package.json`，不含密钥、APK、状态库、私钥或个人本机路径。npm 包没有安装脚本。
 
 ## 安装实际压缩包
 

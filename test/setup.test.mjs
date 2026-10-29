@@ -56,8 +56,8 @@ test('invalid channel and package inputs can be corrected without restarting set
   assert.match(prompt.messages.join(''), /请输入 APK 中的包名/);
 });
 
-test('cancel and unconfirmed summaries never return a project to save', async () => {
+test('cancel and unconfirmed summaries never return an application configuration to save', async () => {
   for (const answers of [['cancel'], ['huawei', '', '123', 'no']]) {
-    await assert.rejects(configureProject('example', prompts(answers).io), /已取消配置，未保存项目/);
+    await assert.rejects(configureProject('example', prompts(answers).io), /已取消配置，未保存应用配置/);
   }
 });
