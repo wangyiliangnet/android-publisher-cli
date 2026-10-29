@@ -74,6 +74,7 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     rows.push(row);
   }
   const project: Project = { schema_version: 2, project_id: projectId, package_name: packageName, channels: rows };
+  if (previous?.display_name) project.display_name = previous.display_name;
   validateProject(project);
   io.write(`\n即将保存的应用配置：${projectId}\n`);
   for (const row of rows) {

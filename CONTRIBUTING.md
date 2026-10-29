@@ -49,10 +49,10 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 
 ## 浏览器回归
 
-Web 凭据表单有独立的合成数据浏览器回归。普通检查跳过此项；本机已提供 Playwright 和 Chrome 时，可以启用：
+Web 用户旅程和凭据表单有独立的合成数据浏览器回归。普通检查跳过此项；本机已提供 Playwright 和 Chrome 时，可以启用：
 
 ```sh
 PUBLISHER_BROWSER_TESTS=1 PUBLISHER_BROWSER_CHANNEL=chrome npm run check
 ```
 
-Playwright 不在默认模块路径时，用 `PUBLISHER_PLAYWRIGHT_MODULE` 指定其 `index.mjs` 入口。回归使用新的浏览器上下文和临时状态，检查多行材料、输入清空、错误脱敏、重复提交和组件修复，不连接真实商店。
+Playwright 不在默认模块路径时，用 `PUBLISHER_PLAYWRIGHT_MODULE` 指定其 `index.mjs` 入口。回归使用新的浏览器上下文和临时状态，覆盖接入、草稿恢复、修改材料、单次确认、部分失败重试、未决提交、人工记录、移动端及凭据清空。共享后端集成测试验证离开页面后提交继续，刷新不会重复写入。全部渠道响应均为合成数据。

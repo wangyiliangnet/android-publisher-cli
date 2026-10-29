@@ -97,14 +97,14 @@ test('backend actions are serialized and receive the exact explicit channel mapp
   const payload = { app_id: 'demo', apks: { honor: '/private/one.apk', huawei: '/private/two.apk' }, release_notes: 'Synthetic release notes' };
   const first = app.action('releases.prepare', payload);
   while (!events.length) await new Promise(resolve => setTimeout(resolve, 5));
-  const second = app.action('releases.list', { app_id: 'demo' });
+  const second = app.action('apps.save', { app: {} });
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(events.length, 1);
   finishFirst();
   await Promise.all([first, second]);
   assert.deepEqual(events[0].payload, payload);
   assert.deepEqual(events.map(event => event.action + ':' + event.phase), [
-    'releases.prepare:start', 'releases.prepare:finish', 'releases.list:start', 'releases.list:finish',
+    'releases.prepare:start', 'releases.prepare:finish', 'apps.save:start', 'apps.save:finish',
   ]);
 });
 
@@ -121,7 +121,7 @@ test('uploads use random private directories and preserve explicit filenames onl
   const next = await (await app.upload('渠道包.apk', Buffer.from('another synthetic APK'))).json();
   assert.notEqual(next.path, uploaded.path);
   await app.close();
-  assert.equal(fs.existsSync(uploaded.path), false);
+  assert.equal(fs.existsSync(uploaded.path), true); // Saved drafts survive a service restart.
 });
 
 test('uploads reject traversal, empty files, oversized declarations and unauthenticated writes', async t => {
@@ -158,7 +158,7 @@ test('arbitrary backend errors never expose secret material to the browser', asy
   assert.equal(response.status, 400);
   const body = await response.text();
   assert.doesNotMatch(body, /synthetic-secret|signed\?/);
-  assert.match(body, /预检未完成/);
+  assert.match(body, /渠道检查未完成/);
 });
 
 test('Web uses the real shared application for APK-free setup and missing-credential guidance', async t => {
@@ -176,7 +176,7 @@ test('Web uses the real shared application for APK-free setup and missing-creden
     assert.equal(response.status, 200);
     return response.json();
   };
-  assert.deepEqual(await action('apps.list'), { apps: [] });
+  assert.deepEqual(await action('apps.list'), { apps: [], overviews: [] });
   const app = { schema_version: 2, project_id: 'synthetic-app', package_name: 'com.example.app', channels: [
     { channel: 'huawei', account: 'huawei-main', app_id: '10001' },
     { channel: 'honor', account: 'honor-main', app_id: '10002', client_id: '10003' },
@@ -189,7 +189,7 @@ test('Web uses the real shared application for APK-free setup and missing-creden
   assert.ok(accounts.accounts.every(row => row.saved === false));
   const checks = await action('apps.check', { app_id: app.project_id });
   assert.equal(Object.keys(checks.errors).length, 2);
-  assert.match(checks.errors.huawei, /account update/);
+  assert.match(checks.errors.huawei, /账号/);
   assert.equal(remoteCalls, 0);
 });
 
@@ -254,4 +254,75 @@ test('Web account onboarding uses the shared validator, retains previous credent
   assert.equal(publisher.store.batchIds().length,0);assert.equal(calls.length,2);
   response=await action('accounts.update',{...body,credentials:{api_secret:'synthetic'},files:{service_account_json:'/synthetic.json'}});
   assert.equal(response.status,400);assert.equal(calls.length,2);
+});
+
+test('browser-independent jobs are idempotent and saved progress stays readable during execution', async t => {
+  let finish, calls = 0;
+  const gate = new Promise(resolve => { finish = resolve; });
+  t.after(() => finish());
+  const app = await fixture(t, async (action, payload) => {
+    if (action === 'releases.submit') { calls++; await gate; return { release: { batch_id: payload.release_id, project_id: 'demo', all_accepted: true }, errors: {} }; }
+    return { apps: [{ project_id: 'demo' }] };
+  });
+  const input = { request_id: 'synthetic-confirmation', action: 'releases.submit', payload: { release_id: 'demo-release', approval_plan: 'a'.repeat(64) } };
+  const response = await app.action('jobs.start', input); assert.equal(response.status, 202);
+  const { job } = await response.json();
+  const again = await (await app.action('jobs.start', input)).json(); assert.equal(again.job.id, job.id);
+  const read = await app.action('apps.list'); assert.equal(read.status, 200); assert.equal(calls, 1);
+  const save = await app.action('drafts.save', { kind: 'app', id: 'new-app', value: { display_name: '示例阅读' } });
+  assert.equal(save.status, 200);
+  const status = await (await app.action('jobs.get', { id: job.id })).json();
+  assert.equal(status.job.status, 'running'); assert.equal(status.job.release_id, 'demo-release');
+  assert.equal(status.job.request_id, input.request_id);
+  assert.equal((await app.action('jobs.start', { ...input, payload: { ...input.payload, approval_plan: 'b'.repeat(64) } })).status, 400);
+  finish();
+  let done;
+  for (let i = 0; i < 100; i++) {
+    done = await (await app.action('jobs.get', { id: job.id })).json();
+    if (done.job.status === 'succeeded') break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(done.job.result.release.all_accepted, true); assert.equal(calls, 1);
+});
+
+test('jobs exclude credential entry and redact errors returned inside successful backend responses', async t => {
+  const app = await fixture(t, async () => ({ release: { targets: [{ last_error: 'synthetic-private-response' }] }, errors: { huawei: 'synthetic-private-response' } }));
+  assert.equal((await app.action('jobs.start', { action: 'accounts.update', request_id: 'synthetic', payload: { credentials: {} } })).status, 400);
+  assert.equal((await app.action('jobs.start', { action: 'releases.prepare', request_id: 'synthetic', payload: { credentials: {} } })).status, 400);
+  const { job } = await (await app.action('jobs.start', { action: 'releases.preflight', request_id: 'synthetic-check', payload: { release_id: 'synthetic' } })).json();
+  let result;
+  for (let i = 0; i < 100; i++) {
+    result = await (await app.action('jobs.get', { id: job.id })).json();
+    if (result.job.status === 'succeeded') break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(result.job.status, 'succeeded'); assert.doesNotMatch(JSON.stringify(result), /synthetic-private-response/);
+  const failed = await fixture(t, async () => { throw new Error('synthetic-private-response'); });
+  const started = await (await failed.action('jobs.start', { action: 'releases.get', request_id: 'synthetic-query', payload: { release_id: 'synthetic', refresh: true } })).json();
+  let status;
+  for (let i = 0; i < 100; i++) {
+    status = await (await failed.action('jobs.get', { id: started.job.id })).json();
+    if (status.job.status === 'failed') break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(status.job.status, 'failed'); assert.doesNotMatch(status.job.error, /synthetic-private-response/);
+});
+
+test('selected APK and unfinished setup survive a local web service restart', async t => {
+  const app = await fixture(t);
+  const uploaded = await (await app.upload('synthetic.apk', 'synthetic APK')).json();
+  const draft = { app_id: 'demo', channels: ['huawei'], apks: { huawei: uploaded.path }, release_notes: '本次更新说明' };
+  assert.equal((await app.action('drafts.save', { kind: 'release', id: 'demo', value: draft })).status, 200);
+  assert.equal((await app.action('drafts.save', { kind: 'app', id: 'new-app', value: { display_name: '未完成应用', channels: [{ channel: 'honor' }] } })).status, 200);
+  await app.close();
+  const restarted = await startWebServer({ invoke: async () => ({}) }, { root: app.root });
+  t.after(() => restarted.close());
+  const html = await (await fetch(restarted.url)).text(); const token = html.match(/name="publisher-token" content="([^"]+)"/)[1];
+  const action = (action, payload) => fetch(restarted.url + '/api/action', { method: 'POST', headers: {
+    Origin: restarted.url, 'Content-Type': 'application/json', 'X-Publisher-Token': token,
+  }, body: JSON.stringify({ action, payload }) });
+  const result = await (await action('drafts.get', { kind: 'release', id: 'demo' })).json();
+  assert.deepEqual(result.draft, draft); assert.equal(fs.readFileSync(result.draft.apks.huawei, 'utf8'), 'synthetic APK');
+  assert.equal((await (await action('drafts.get', { kind: 'app', id: 'new-app' })).json()).draft.display_name, '未完成应用');
+  assert.equal((await action('drafts.save', { kind: 'app', id: 'new-app', value: { client_secret: 'synthetic' } })).status, 400);
 });

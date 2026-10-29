@@ -103,12 +103,13 @@ export function releaseText(release: ReleaseView): string {
     const ch = target.channel as Channel;
     const support = target.query_support as { review: boolean; availability: boolean };
     const state = (key: string) => labels[String(target[key])] ?? String(target[key]);
-    rows.push([channelNames[ch], target.execution_phase === 'submitted' ? '已受理' : target.recovery_required ? '待核对' : state('execution_phase'),
-      target.review_state === 'unknown' && !support.review ? '待人工核对' : state('review_state'),
-      target.availability_state === 'unknown' && !support.availability ? '待人工核对' : state('availability_state'), state('query_status')]);
+    const submitted = target.execution_phase === 'submitted';
+    rows.push([channelNames[ch], submitted ? '商店已接收' : target.recovery_required ? '提交结果待确认' : state('execution_phase'),
+      !submitted ? '尚未确认提交' : target.review_state === 'unknown' && !support.review ? '需到商店查看' : state('review_state'),
+      !submitted ? '尚未确认提交' : target.availability_state === 'unknown' && !support.availability ? '需到商店查看' : state('availability_state'), state('query_status')]);
   }
   const manual = release.manual_observations as unknown[] ?? [];
-  const lines = [`应用：${release.project_id}  包名：${release.package_name}`, `版本：${release.version_name}（${release.version_code}）`,
+  const lines = [`应用：${release.display_name ?? release.project_id}  包名：${release.package_name}`, `版本：${release.version_name}（${release.version_code}）`,
     `发布记录：${release.batch_id}`, '', table(rows),
     `受理 ${release.accepted_targets}/${release.total_targets}；自动确认审核通过 ${release.approved_targets}；自动确认上架 ${release.live_targets}；人工记录 ${manual.length} 条。`];
   for (const target of release.targets) {
@@ -118,7 +119,8 @@ export function releaseText(release: ReleaseView): string {
       lines.push(`${channelNames[target.channel as Channel]}（人工核对）：审核 ${labels[String(observation.review_state)]}；上架 ${labels[String(observation.availability_state)]}；${observation.observed_at}；来源：${observation.source}`);
   }
   if (release.all_accepted) lines.push('提交已完成。用 android-release status ' + release.project_id + ' 跟踪审核和上架。');
-  else lines.push('继续发布：android-release publish ' + release.project_id);
+  else if (release.recovery_required) lines.push('部分提交结果待确认，请先检查：android-release status ' + release.project_id + ' --reconcile\n其他可安全处理的渠道可通过 android-release publish ' + release.project_id + ' 继续，原发布范围保留。');
+  else lines.push('继续未完成的提交：android-release publish ' + release.project_id);
   return lines.join('\n') + '\n';
 }
 function help(context = ''): string {
@@ -137,6 +139,7 @@ function help(context = ''): string {
   return intro + (descriptions[context] ?? Object.values(descriptions).map(row => row.split('\n\n')[0]).join('\n\n') + '\n\n发布和恢复均通过 publish 进入。用任一命令的 --help 查看示例。\n');
 }
 function resultCode(release: ReleaseView, errors: Record<string, string>, selected?: Channel[]): number {
+  if (release.recovery_required) return 3;
   const targets = selected ? release.targets.filter(row => selected.includes(row.channel as Channel)) : release.targets;
   if (targets.some(row => row.recovery_required)) return 3;
   if (targets.every(row => row.execution_phase === 'submitted')) return 0;
@@ -155,8 +158,8 @@ export async function run(args: string[], injected: { application?: PublisherApp
     if (id) { application().app(id); return id; }
     if (!apps.length) throw new Error('尚未配置应用。请运行 android-release app add');
     if (apps.length === 1) return apps[0]!.project_id;
-    io.write(table([['应用', '包名', '渠道'], ...apps.map(row => [row.project_id, row.package_name ?? '', row.channels.map(target => channelNames[target.channel]).join('、')])]));
-    const selected = await io.ask('选择应用'); application().app(selected); return selected;
+    io.write(table([['应用', '短名', '包名', '渠道'], ...apps.map(row => [row.display_name ?? row.project_id, row.project_id, row.package_name ?? '', row.channels.map(target => channelNames[target.channel]).join('、')])]));
+    const selected = await io.ask('输入应用短名'); application().app(selected); return selected;
   };
   try {
     const command = args[0] ?? '--help';
@@ -183,10 +186,10 @@ export async function run(args: string[], injected: { application?: PublisherApp
     }
     if (command === 'app') {
       const action = args[1];
-      if (action === 'list') { allow(flags, ['json']); const apps = application().apps(); if (flags.json) json({ apps }); else out(apps.length ? table([['应用', '包名', '渠道'], ...apps.map(row => [row.project_id, row.package_name ?? '', row.channels.map(target => channelNames[target.channel]).join('、')])]) : '尚未配置应用。运行 android-release app add 开始。\n'); return 0; }
+      if (action === 'list') { allow(flags, ['json']); const apps = application().apps(); if (flags.json) json({ apps }); else out(apps.length ? table([['应用', '短名', '包名', '渠道'], ...apps.map(row => [row.display_name ?? row.project_id, row.project_id, row.package_name ?? '', row.channels.map(target => channelNames[target.channel]).join('、')])]) : '尚未配置应用。运行 android-release app add 开始。\n'); return 0; }
       if (!['add', 'edit'].includes(action ?? '')) throw new Error('使用 app add、app edit 或 app list');
       allow(flags, []);
-      const id = action === 'edit' ? await chooseApp(positional[0]) : positional[0] ?? await io.ask('应用配置名（字母、数字、点、横线或下划线）');
+      const id = action === 'edit' ? await chooseApp(positional[0]) : positional[0] ?? await io.ask('应用短名（供命令行选择，使用字母、数字、点、横线或下划线）');
       if (!validId(id)) throw new Error('应用配置名无效');
       const previous = application().apps().find(row => row.project_id === id);
       if (action === 'add' && previous) throw new Error('应用已存在，请使用 app edit');
@@ -209,7 +212,7 @@ export async function run(args: string[], injected: { application?: PublisherApp
     }
     if (command === 'account') {
       const action = args[1];
-      if (action === 'list') { allow(flags, ['json']); const accounts = application().accounts(); if (flags.json) json({ accounts }); else out(accounts.length ? table([['渠道', '账号备注', '凭据', '应用'], ...accounts.map(row => [channelNames[row.channel], row.account, row.saved ? '已保存' : '待配置', row.apps.join('、')])]) : '尚无渠道账号。先运行 android-release app add。\n'); return 0; }
+      if (action === 'list') { allow(flags, ['json']); const accounts = application().accounts(); if (flags.json) json({ accounts }); else out(accounts.length ? table([['渠道', '账号备注', '凭据', '应用'], ...accounts.map(row => [channelNames[row.channel], row.account, row.saved ? '已保存' : '待配置', row.app_names.join('、') || '暂未关联应用'])]) : '尚无渠道账号。先运行 android-release app add。\n'); return 0; }
       allow(flags, []);
       if (!['update', 'forget'].includes(action ?? '') || positional.length > 2) throw new Error('使用 account list、account update 或 account forget');
       const channel = positional[0] ?? await io.ask('渠道', CHANNELS[0]);
@@ -219,10 +222,11 @@ export async function run(args: string[], injected: { application?: PublisherApp
       const selected = accounts.find(row => row.account === account);
       if (!selected) throw new Error('账号尚未关联应用');
       if (action === 'forget') {
-        io.write(`将清除 ${channelNames[channel]} / ${account} 的本机凭据。受影响应用：${selected.apps.join('、')}。发布回执和未决请求记录会保留。\n`);
+        io.write(`将清除 ${channelNames[channel]} / ${account} 的本机凭据。${selected.apps.length ? '受影响应用：' + selected.app_names.join('、') : '目前没有应用关联'}。发布回执和未决请求记录会保留。\n`);
         if (await io.ask('输入 yes 清除') !== 'yes') throw new Canceled();
         application().forgetAccount(channel, account); out('本机凭据已清除。\n'); return 0;
       }
+      if (!selected.apps.length) throw new Error('这个账号暂未关联应用。请先在应用资料中选择此发布账号，再验证和更新凭据。');
       io.suspend(); const prompt = new PromptCredentials();
       try { await application().updateAccount(channel, account, await prompt.forChannel(channel)); }
       finally { prompt.clear(); }
@@ -277,11 +281,20 @@ export async function run(args: string[], injected: { application?: PublisherApp
       if (selected.some(ch => !config.channels.some(row => row.channel === ch))) throw new Error('所选渠道尚未配置');
       let release: ReleaseView | undefined;
       const pending = application().releases(id).find(row => !row.all_accepted);
-      if (pending && !flags.apk && !flags['notes-file'] && !flags.channels) {
+      if (pending && !flags.apk && !flags['notes-file']) {
         io.write(releaseText(pending));
         const action = await io.ask('继续已有发布 / 准备新版本 / 查看结果：输入 continue/new/status', 'continue');
         if (action === 'status') { out(releaseText(pending)); return 0; }
-        if (action === 'continue') { release = pending; selected = pending.targets.map(row => row.channel as Channel); }
+        if (action === 'continue') {
+          release = pending;
+          const available = pending.targets.filter(row => row.execution_phase !== 'submitted' && !row.recovery_required).map(row => row.channel as Channel);
+          selected = flags.channels ? selected : available;
+          if (!selected.length || selected.some(channel => !available.includes(channel))) {
+            out(releaseText(pending));
+            if (pending.recovery_required) return 3;
+            throw new Error('所选渠道目前无法重试，请查看发布状态');
+          }
+        }
         else if (action !== 'new') throw new Canceled();
       }
       if (!release) {
@@ -322,15 +335,17 @@ export async function run(args: string[], injected: { application?: PublisherApp
           checked = { release: checked.release, errors: {} };
         } else throw new Canceled();
       }
-      const reviewed = application().reviewRelease(release.batch_id, selected);
-      io.write(`\n应用：${id} / ${release.package_name}\n版本：${release.version_name}（${release.version_code}）\n审核通过后立即上架。\n`);
+      const attemptOnly = release.has_writes === true;
+      const reviewed = application().reviewRelease(release.batch_id, selected, attemptOnly);
+      if (attemptOnly) io.write('本次只处理所选未完成渠道；原发布的其他渠道和结果继续保留。\n');
+      io.write(`\n应用：${config.display_name ?? id} / ${release.package_name}\n版本：${release.version_name}（${release.version_code}）\n审核通过后立即上架。\n`);
       for (const target of reviewed.release.targets.filter(row => selected.includes(row.channel as Channel))) {
         const artifact = target.artifact as Record<string, unknown>;
         io.write(`${channelNames[target.channel as Channel]} → ${artifact.filename}；商店应用 ${target.app_id}；账号 ${target.account}\n`);
       }
       io.write(`\n更新说明：\n${reviewed.plan.release_notes}\n`);
       if (await io.ask('确认以上应用、APK 和渠道范围，输入 yes 上传并提交') !== 'yes') throw new Canceled();
-      const result = await application().submitRelease(release.batch_id, reviewed.plan.approval_plan);
+      const result = await application().submitRelease(release.batch_id, reviewed.plan.approval_plan, attemptOnly);
       out(releaseText(result.release)); errorsText(result.errors);
       return resultCode(result.release, result.errors, selected);
     }

@@ -20,6 +20,7 @@ export interface ProjectChannel {
 export interface Project {
   schema_version: 2;
   project_id: string;
+  display_name?: string;
   package_name?: string;
   channels: ProjectChannel[];
 }
@@ -169,9 +170,10 @@ export function canonical(value: unknown): string {
 export const digest = (value: unknown): string => createHash('sha256').update(typeof value === 'string' ? value : canonical(value)).digest('hex');
 
 export function validateProject(value: unknown): Project {
-  assertObject(value, ['schema_version', 'project_id', 'channels'], ['package_name', 'signer_sha256']);
+  assertObject(value, ['schema_version', 'project_id', 'channels'], ['display_name', 'package_name', 'signer_sha256']);
   if (value.schema_version !== 2 || !validId(value.project_id) || !Array.isArray(value.channels) || value.channels.length < 1 || value.channels.length > CHANNELS.length) throw new Error('invalid project identity');
   if (value.package_name !== undefined && !validPackage(value.package_name)) throw new Error('invalid saved project identity');
+  if (value.display_name !== undefined && (!validText(value.display_name, 256) || !value.display_name.trim())) throw new Error('invalid application display name');
   if (value.signer_sha256 !== undefined && !validHash(value.signer_sha256)) throw new Error('invalid saved project identity');
   const seen = new Set<string>();
   for (const row of value.channels) {

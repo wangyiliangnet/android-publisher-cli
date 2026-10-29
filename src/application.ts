@@ -6,7 +6,7 @@ import { channelAdapter } from './channels/index.js';
 import { protocols } from './channels/capabilities.js';
 import { type CredentialSet, type CredentialSource, CredentialInputError, resolveCredentialInput, validateCredentials } from './credentials.js';
 import { loadProject, prepare, preflight, previewBatch, publicError, reconcile, refresh, review, saveProject, submit, validateSubmission } from './engine.js';
-import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, isChannel, validHash, validId, validPackage, validateProject } from './model.js';
+import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, digest, isChannel, validHash, validId, validPackage, validateProject } from './model.js';
 import { dataRoot, hashFile, privateDir, readJSON, writePrivate } from './private-file.js';
 import { ensureRuntime, runtimeDiagnostic } from './runtime.js';
 import { type ManualObservation, Store } from './state.js';
@@ -74,11 +74,17 @@ export class PublisherApplication {
     if (!validPackage(app.package_name)) throw new Error('请填写应用包名，例如 com.example.app');
     for (const row of app.channels) if (['xiaomi', 'oppo', 'vivo'].includes(row.channel) && row.app_id !== app.package_name)
       throw new Error(`${row.channel}：渠道包名与应用包名不一致`);
-    for (const row of app.channels) for (const other of this.apps()) for (const saved of other.channels) {
+    const knownAccounts = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()];
+    for (const row of app.channels) for (const saved of knownAccounts) {
       if (row.channel === saved.channel && row.client_id && row.client_id === saved.client_id && row.account !== saved.account)
-        throw new Error(`${row.channel}：此 API 账号已使用备注 ${saved.account}，请复用该备注`);
+        throw new Error('此 API 账号已接入，请选择已有发布账号。');
+      if (row.channel === saved.channel && row.account === saved.account && row.client_id && saved.client_id && row.client_id !== saved.client_id)
+        throw new Error('这个发布账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的发布账号。');
     }
+    const previous = this.apps().find(other => other.project_id === app.project_id);
+    if (previous) this.registerAccounts(previous.channels);
     saveProject(app, this.root, replace);
+    this.registerAccounts(app.channels);
     return app;
   }
   app(id: string): Project { return loadProject(id, this.root); }
@@ -92,15 +98,21 @@ export class PublisherApplication {
     const selected = this.selection(id);
     const targets = (summary.targets as Array<Record<string, unknown>>).filter(row => selected.includes(row.channel as Channel)).map<Record<string, unknown>>(row => {
       const frozen = batch.targets.find(target => target.channel === row.channel)!;
+      const operations = this.store.operations(id, frozen.channel);
+      const last = operations.at(-1);
       const recovery = (row.recovery as Array<Record<string, unknown>>).map(issue => ({ ...issue,
         next_action: `android-release status ${batch.project_id} --release ${String(issue.batch_id ?? id)}` }));
       return { ...row, recovery, account: frozen.account, app_id: frozen.app_id, artifact: frozen.artifact,
+        execution_attempted: operations.length > 0,
+        ...(last ? { last_operation: { step: last.step, effect: last.effect, created_at: last.started_at } } : {}),
         manual_observations: this.store.manualObservations(id, frozen.channel) };
     });
     const accepted = targets.filter(row => row.execution_phase === 'submitted').length;
     const approved = targets.filter(row => row.review_state === 'approved').length;
     const live = targets.filter(row => row.availability_state === 'live').length;
+    const hasWrites = this.store.operations(id).length > 0;
     return { ...summary, total_targets: targets.length, accepted_targets: accepted, approved_targets: approved, live_targets: live,
+      has_writes: hasWrites, can_edit: !hasWrites, display_name: this.app(batch.project_id).display_name ?? batch.project_id,
       all_accepted: accepted === targets.length, all_approved: approved === targets.length, all_live: live === targets.length,
       recovery_required: targets.some(row => row.recovery_required), selected_channels: selected,
       excluded_channels: batch.targets.map(target => target.channel).filter(channel => !selected.includes(channel)),
@@ -122,7 +134,8 @@ export class PublisherApplication {
     const artifact = { path: '/connection-check.apk', filename: 'connection-check.apk', sha256: '0'.repeat(64),
       signer_sha256: '0'.repeat(64), size: 1, package_name: app.package_name ?? row.app_id,
       version_name: 'connection-check', version_code: '9223372036854775807', abis: ['arm64-v8a'] };
-    const target = { ...row, artifact };
+    const icon = row.channel === 'xiaomi' && row.icon_path ? hashFile(row.icon_path) : undefined;
+    const target = { ...row, artifact, ...(icon ? { icon_sha256: icon.sha256, icon_size: icon.size } : {}) };
     const batch: Batch = { schema_version: 2, batch_id: `connection-${randomBytes(8).toString('hex')}`,
       project_id: app.project_id, package_name: artifact.package_name, version_name: artifact.version_name,
       version_code: artifact.version_code, signer_sha256: artifact.signer_sha256, release_notes: '检查渠道连接权限',
@@ -130,49 +143,123 @@ export class PublisherApplication {
     const secrets = credentials ?? await this.source([row]).forChannel(row.channel);
     await channelAdapter(batch, target, secrets, this.store, this.fetcher).preflight();
   }
-  async checkApp(id: string): Promise<{ channels: Array<{ channel: Channel; connected: boolean }>; errors: Record<string, string> }> {
+  private connectionFile(id: string): string { return path.join(this.root, 'connections', `${id}.json`); }
+  private connections(app: Project): Array<Record<string, unknown>> {
+    try {
+      const saved = readJSON(this.connectionFile(app.project_id), 65536, true) as { channels?: unknown };
+      return Array.isArray(saved.channels) ? saved.channels.filter(item => item && typeof item === 'object' &&
+        isChannel(item.channel) && validHash(item.bindings_digest) && typeof item.connected === 'boolean' &&
+        typeof item.checked_at === 'string' && Number.isFinite(Date.parse(item.checked_at))).map(item => ({
+          channel: item.channel, bindings_digest: item.bindings_digest, connected: item.connected, checked_at: item.checked_at,
+          ...(item.connected ? {} : { issue: '账号访问验证未通过，请检查凭据、商店应用资料或网络后重新验证。' }),
+        })) : [];
+    } catch { return []; }
+  }
+  private saveConnection(app: Project, row: ProjectChannel, connected: boolean): void {
+    const channels = this.connections(app).filter(item => item.channel !== row.channel);
+    channels.push({ channel: row.channel, bindings_digest: digest([app.package_name, row]), connected,
+      checked_at: new Date().toISOString(), ...(connected ? {} : { issue: '账号访问验证未通过，请检查凭据、商店应用资料或网络后重新验证。' }) });
+    writePrivate(this.connectionFile(app.project_id), JSON.stringify({ channels }) + '\n', true, true);
+  }
+  appOverviews(): Array<Record<string, unknown>> {
+    return this.apps().map(app => {
+      const saved = this.connections(app);
+      const releases = this.releases(app.project_id);
+      const latest = releases.find(release => release.has_writes) ?? releases[0];
+      const channels = app.channels.map(row => {
+        const connection = saved.find(item => item.channel === row.channel && item.bindings_digest === digest([app.package_name, row]));
+        const available = this.vault.has(row.channel, row.account);
+        return { channel: row.channel, account: row.account, saved: available,
+          connected: available && connection?.connected === true,
+          ...(connection ? { checked_at: connection.checked_at, ...(connection.issue ? { issue: connection.issue } : {}) } : {}) };
+      });
+      return { app_id: app.project_id, channels, ...(latest ? { latest_release: latest } : {}) };
+    });
+  }
+  async checkApp(id: string, selected?: Channel[]): Promise<{ channels: Array<{ channel: Channel; connected: boolean }>; errors: Record<string, string> }> {
     const app = this.app(id);
+    if (selected && (!selected.length || new Set(selected).size !== selected.length || selected.some(ch => !app.channels.some(row => row.channel === ch)))) throw new Error('请选择此应用已配置的渠道');
     const errors: Record<string, string> = {};
     const channels = [];
-    for (const row of app.channels) {
-      try { await this.checkChannel(app, row); channels.push({ channel: row.channel, connected: true }); }
-      catch (error) { errors[row.channel] = publicError(error); channels.push({ channel: row.channel, connected: false }); }
+    for (const row of app.channels.filter(row => !selected || selected.includes(row.channel))) {
+      try { await this.checkChannel(app, row); channels.push({ channel: row.channel, connected: true }); this.saveConnection(app, row, true); }
+      catch (error) { errors[row.channel] = publicError(error); channels.push({ channel: row.channel, connected: false }); this.saveConnection(app, row, false); }
     }
-    writePrivate(path.join(this.root, 'connections', `${id}.json`), JSON.stringify({ checked_at: new Date().toISOString(), channels, errors }) + '\n', true, true);
     return { channels, errors };
+  }
+  private accountBindings(): Array<{ app: Project; row: ProjectChannel; current: boolean }> {
+    const apps = this.apps();
+    const bindings = apps.flatMap(app => app.channels.map(row => ({ app, row, current: true })));
+    const identities = new Set(bindings.map(({ row }) => `${row.channel}:${row.account}`));
+    const key = (app: Project, row: ProjectChannel) => canonical([app.project_id, app.package_name, row.channel, row.account, row.app_id, row.client_id, row.language_id]);
+    const seen = new Set(bindings.map(({ app, row }) => key(app, row)));
+    for (const id of this.store.batchIds()) {
+      const batch = this.store.loadBatch(id);
+      for (const target of batch.targets) {
+        const active = this.store.target(id, target.channel).phase !== 'submitted' || this.store.recovery(id, target.channel).length > 0;
+        if (!active && identities.has(`${target.channel}:${target.account}`)) continue;
+        const row: ProjectChannel = { channel: target.channel, account: target.account, app_id: target.app_id,
+          ...(target.client_id ? { client_id: target.client_id } : {}), ...(target.language_id ? { language_id: target.language_id } : {}),
+          ...(target.icon_path ? { icon_path: target.icon_path } : {}), ...(target.privacy_url ? { privacy_url: target.privacy_url } : {}) };
+        const current = apps.find(app => app.project_id === batch.project_id);
+        const app: Project = { schema_version: 2, project_id: batch.project_id, package_name: batch.package_name,
+          ...(current?.display_name ? { display_name: current.display_name } : {}), channels: [row] };
+        if (seen.has(key(app, row))) continue;
+        seen.add(key(app, row)); bindings.push({ app, row, current: false });
+      }
+    }
+    return bindings;
+  }
+  private registerAccounts(rows: ProjectChannel[]): void {
+    for (const row of rows) writePrivate(path.join(this.root, 'account-profiles', `${digest([row.channel, row.account])}.json`),
+      JSON.stringify({ channel: row.channel, account: row.account, ...(row.client_id ? { client_id: row.client_id } : {}) }) + '\n', true, true);
+  }
+  private accountProfiles(): Array<{ channel: Channel; account: string; client_id?: string }> {
+    const directory = path.join(this.root, 'account-profiles');
+    if (!fs.existsSync(directory)) return [];
+    return fs.readdirSync(directory).filter(name => /^[a-f0-9]{64}\.json$/.test(name)).flatMap(name => {
+      try {
+        const value = readJSON(path.join(directory, name), 4096, true) as Record<string, unknown>;
+        if (!isChannel(value.channel) || !validId(value.account) || value.client_id !== undefined && !validId(value.client_id) ||
+          name !== `${digest([value.channel, value.account])}.json`) return [];
+        return [{ channel: value.channel, account: value.account, ...(typeof value.client_id === 'string' ? { client_id: value.client_id } : {}) }];
+      } catch { return []; }
+    });
   }
   async updateAccount(channel: Channel, account: string, credentials: CredentialSet): Promise<void> {
     validateCredentials(channel, credentials);
-    const apps = this.apps().filter(app => app.channels.some(row => row.channel === channel && row.account === account));
-    if (!apps.length) throw new Error('账号尚未关联应用，请先运行 android-release app add');
-    for (const clientId of new Set(apps.map(app => {
-      const row = app.channels.find(row => row.channel === channel && row.account === account)!;
-      return row.client_id ?? row.account;
-    }))) this.store.invalidateAccountToken(channel, account, clientId);
-    for (const app of apps) await this.checkChannel(app, app.channels.find(row => row.channel === channel && row.account === account)!, credentials);
+    const bindings = this.accountBindings().filter(({ row }) => row.channel === channel && row.account === account);
+    if (!bindings.length) throw new Error('账号尚未关联应用，请先运行 android-release app add');
+    for (const clientId of new Set(bindings.map(({ row }) => row.client_id ?? row.account))) this.store.invalidateAccountToken(channel, account, clientId);
+    for (const { app, row } of bindings) await this.checkChannel(app, row, credentials);
     this.vault.save(channel, account, credentials);
+    for (const { app, row, current } of bindings) if (current) this.saveConnection(app, row, true);
   }
   async updateAccountFromInput(channel: unknown, account: unknown, raw?: unknown, files?: unknown): Promise<void> {
     if (!isChannel(channel) || !validId(account)) throw new CredentialInputError('input');
-    if (!this.accounts().some(row => row.channel === channel && row.account === account)) throw new CredentialInputError('account');
+    if (!this.accounts().some(row => row.channel === channel && row.account === account && row.apps.length)) throw new CredentialInputError('account');
     const credentials = resolveCredentialInput(channel, raw, files);
     try { await this.updateAccount(channel, account, credentials); }
     finally { for (const field of Object.keys(credentials)) delete credentials[field]; }
   }
-  accounts(): Array<{ channel: Channel; account: string; apps: string[]; saved: boolean }> {
-    const result = new Map<string, { channel: Channel; account: string; apps: string[]; saved: boolean }>();
-    for (const app of this.apps()) for (const row of app.channels) {
+  accounts(): Array<{ channel: Channel; account: string; apps: string[]; app_names: string[]; saved: boolean; client_id?: string }> {
+    const result = new Map<string, { channel: Channel; account: string; apps: string[]; app_names: string[]; saved: boolean; client_id?: string }>();
+    for (const { app, row } of this.accountBindings()) {
       const key = `${row.channel}:${row.account}`;
       const previous = result.get(key);
-      if (previous) previous.apps.push(app.project_id);
-      else result.set(key, { channel: row.channel, account: row.account, apps: [app.project_id], saved: this.vault.has(row.channel, row.account) });
+      if (previous) { if (!previous.apps.includes(app.project_id)) { previous.apps.push(app.project_id); previous.app_names.push(app.display_name ?? app.project_id); } }
+      else result.set(key, { channel: row.channel, account: row.account, apps: [app.project_id], app_names: [app.display_name ?? app.project_id],
+        saved: this.vault.has(row.channel, row.account), ...(row.client_id ? { client_id: row.client_id } : {}) });
     }
+    for (const row of this.accountProfiles()) if (!result.has(`${row.channel}:${row.account}`))
+      result.set(`${row.channel}:${row.account}`, { ...row, apps: [], app_names: [], saved: this.vault.has(row.channel, row.account) });
     return [...result.values()];
   }
   forgetAccount(channel: Channel, account: string): void {
     if (!isChannel(channel) || !validId(account)) throw new Error('invalid account');
     this.vault.forget(channel, account);
-    const clientIds = this.apps().flatMap(app => app.channels.filter(row => row.channel === channel && row.account === account).map(row => row.client_id ?? row.account));
+    const clientIds = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()]
+      .filter(row => row.channel === channel && row.account === account).map(row => row.client_id ?? row.account);
     this.store.forgetAccountMaterials(channel, account, clientIds);
   }
   async prepareRelease(input: PrepareReleaseInput): Promise<{ release: ReleaseView; duplicate: boolean; related_release?: string }> {
@@ -219,29 +306,37 @@ export class PublisherApplication {
     const result = await preflight(this.store, id, this.source(batch.targets), channels ?? this.selection(id), this.fetcher);
     return { release: this.release(id), errors: result.errors as Record<string, string> };
   }
-  reviewRelease(id: string, channels?: Channel[]): { release: ReleaseView; plan: Approval } {
+  reviewRelease(id: string, channels?: Channel[], attemptOnly = false): { release: ReleaseView; plan: Approval } {
     const batch = this.store.loadBatch(id);
     const selected = channels ?? this.selection(id);
-    for (const target of batch.targets) if (!selected.includes(target.channel) && this.store.operations(id, target.channel).length)
+    const recordScope = this.selection(id);
+    if (attemptOnly && (!this.store.operations(id).length || selected.some(channel => !recordScope.includes(channel)))) throw new Error('重试范围须来自本次已执行发布');
+    for (const target of batch.targets) if (!attemptOnly && !selected.includes(target.channel) && this.store.operations(id, target.channel).length)
       throw new Error(`${target.channel}：已有执行记录的渠道须保留在本次发布中`);
     for (const channel of selected) if (this.store.recovery(id, channel).length) throw new RecoveryRequired(`${channel}：请求结果待核对，请先查看发布状态`);
     const directory = path.join(this.root, 'plans'); privateDir(directory);
     const temp = path.join(directory, `${id}-${randomBytes(8).toString('hex')}.json`);
     const plan = review(this.store, id, temp, selected);
     fs.renameSync(temp, this.planFile(id, plan.approval_plan));
+    if (attemptOnly) writePrivate(this.planFile(id, plan.approval_plan) + '.attempt.json', JSON.stringify({ record_scope: recordScope }) + '\n', true);
     return { release: this.release(id), plan };
   }
   private planFile(id: string, hash: string): string {
     if (!validId(id) || !validHash(hash)) throw new Error('invalid submission confirmation');
     return path.join(this.root, 'plans', `${id}-${hash}.json`);
   }
-  async submitRelease(id: string, hash: string): Promise<{ release: ReleaseView; errors: Record<string, string> }> {
+  async submitRelease(id: string, hash: string, attemptOnly = false): Promise<{ release: ReleaseView; errors: Record<string, string> }> {
     const batch = this.store.loadBatch(id);
     const file = this.planFile(id, hash);
     const plan = validateSubmission(this.store, id, file, hash);
-    for (const target of batch.targets) if (!plan.selected_channels.includes(target.channel) && this.store.operations(id, target.channel).length)
+    if (attemptOnly) {
+      const context = readJSON(file + '.attempt.json', 4096, true) as { record_scope: Channel[] };
+      if (!this.store.operations(id).length || canonical(context.record_scope) !== canonical(this.selection(id)) ||
+        plan.selected_channels.some(channel => !context.record_scope.includes(channel))) throw new RecoveryRequired('原发布范围发生变化，请重新确认本次重试渠道');
+    }
+    for (const target of batch.targets) if (!attemptOnly && !plan.selected_channels.includes(target.channel) && this.store.operations(id, target.channel).length)
       throw new RecoveryRequired(`${target.channel}：已有执行记录，无法用旧计划缩小范围。请重新查看并核对本次发布`);
-    writePrivate(path.join(this.root, 'release-scopes', `${id}.json`), JSON.stringify({ selected_channels: plan.selected_channels }) + '\n', true, true);
+    if (!attemptOnly) writePrivate(path.join(this.root, 'release-scopes', `${id}.json`), JSON.stringify({ selected_channels: plan.selected_channels }) + '\n', true, true);
     const result = await submit(this.store, id, file, hash, this.source(batch.targets), await this.tools(), true, this.fetcher);
     return { release: this.release(id), errors: result.errors as Record<string, string> };
   }
@@ -270,15 +365,15 @@ export class PublisherApplication {
       return p.channels as Channel[];
     };
     switch (action) {
-      case 'apps.list': return { apps: this.apps() };
+      case 'apps.list': return { apps: this.apps(), overviews: this.appOverviews() };
       case 'apps.save': return { app: this.saveApp(p.app, p.replace === true) };
-      case 'apps.check': return this.checkApp(text('app_id'));
+      case 'apps.check': return this.checkApp(text('app_id'), channels());
       case 'releases.list': return { releases: this.releases(text('app_id')) };
       case 'releases.prepare': return this.prepareRelease({ app_id: text('app_id'), apks: p.apks as PrepareReleaseInput['apks'],
         release_notes: text('release_notes'), ...(p.channels === undefined ? {} : { channels: channels()! }) });
       case 'releases.preflight': return this.preflightRelease(text('release_id'), channels());
-      case 'releases.review': return this.reviewRelease(text('release_id'), channels());
-      case 'releases.submit': return this.submitRelease(text('release_id'), text('approval_plan'));
+      case 'releases.review': return this.reviewRelease(text('release_id'), channels(), p.attempt_only === true);
+      case 'releases.submit': return this.submitRelease(text('release_id'), text('approval_plan'), p.attempt_only === true);
       case 'releases.get': return this.getRelease(text('release_id'), p.refresh === true);
       case 'releases.reconcile': return this.reconcileRelease(text('release_id'), channels());
       case 'releases.manual': return { release: this.recordManual(text('release_id'), {

@@ -9,6 +9,8 @@ import { CredentialInputError } from './credentials.js';
 import { page } from './web/page.js';
 import { clientScript } from './web/client.js';
 import { stylesheet } from './web/styles.js';
+import { WebWorkspace } from './web/workspace.js';
+import { WebJobs } from './web/jobs.js';
 
 export interface WebBackend {
   invoke(action: string, payload: unknown): Promise<unknown>;
@@ -16,22 +18,56 @@ export interface WebBackend {
 
 const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list', 'releases.prepare',
   'releases.preflight', 'releases.review', 'releases.submit', 'releases.get', 'releases.manual', 'releases.reconcile',
-  'accounts.list', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols']);
+  'accounts.list', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols',
+  'drafts.get', 'drafts.save', 'drafts.clear', 'jobs.start', 'jobs.get', 'jobs.list']);
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
 const actionErrors: Record<string, string> = {
-  'apps.save': '应用配置未保存。请检查应用名称、包名、各渠道应用标识和小米图标资料。',
-  'apps.check': '渠道访问检查未完成。请在“账号与凭据”中检查并更新需要重新接入的账号。',
+  'apps.save': '应用资料未保存。请检查名称、Android 包名和各渠道的商店应用资料。已填写内容保留在本机草稿中。',
+  'apps.check': '渠道访问验证未完成。应用资料已保留，请检查该渠道的账号、商店应用资料或网络后重新验证。',
   'releases.prepare': '发布材料准备未完成。请检查各渠道 APK 的包名、版本和签名是否一致，更新说明是否符合限制，并查看环境诊断。',
-  'releases.preflight': '渠道预检未完成。请检查账号凭据和网络，修复后重新检查。',
-  'releases.review': '提交摘要生成未完成。请重新检查渠道，查看是否有待核对请求，并确认本次选定范围。',
-  'releases.submit': '提交操作未完成。请先查看本次发布的最新状态，再继续未完成渠道；已受理的渠道会保留结果。',
-  'releases.manual': '人工核对记录未保存。请核对渠道、结果来源和核对时间，再重新保存。',
-  'releases.reconcile': '远端核对未完成。请保留本次记录，检查网络和账号权限后重试。',
-  'accounts.forget': '本机凭据清除未完成。请解锁钥匙串，或在终端使用 account forget 重试。',
+  'releases.preflight': '渠道检查未完成。APK 和更新说明已保留，尚未提交。请检查账号访问权限或网络后重新检查。',
+  'releases.review': '提交内容尚不能确认。请处理未通过的渠道检查或提交结果待确认事项，再重新检查。',
+  'releases.submit': '提交未能完成。请先查看本次发布进度，再按各渠道的处理入口操作；商店已接收的结果会保留。',
+  'releases.get': '本次查询未能更新结果。已保存的进度仍保留，请检查网络或渠道账号权限后重新查询。',
+  'releases.manual': '商店查看结果未保存。请检查渠道、结果来源和查看时间，再重新保存。',
+  'releases.reconcile': '提交结果检查未完成。原请求记录已保留，请检查网络或渠道账号权限后重新检查。',
+  'accounts.forget': '本机凭据清除未完成。请解锁钥匙串后重试，原发布记录和请求回执仍保留。',
   'accounts.update': '凭据更新未完成。请核对材料、账号权限、网络与钥匙串状态，并查看当前账号状态；存在未决令牌请求时，须先核对原请求。',
   'doctor.repair': '检查组件安装或修复未完成。请检查网络和本机目录权限后重试。',
+  'drafts.get': '本机草稿未能读取。请保留现有资料，检查本机目录权限。',
+  'drafts.save': '草稿尚未保存。请保留当前页面，检查本机目录权限后重试。',
+  'drafts.clear': '本机草稿未能清除。已提交的发布记录仍保留。',
+  'jobs.start': '操作未能开始。请先查看当前任务，再重试。',
+  'jobs.get': '未找到此操作。请返回应用查看已保存的发布进度。',
 };
+
+function safeActionError(action: string, error: unknown): string {
+  if (action === 'apps.save' && error instanceof Error) {
+    if (error.message === '此 API 账号已接入，请选择已有发布账号。') return '此 API 账号已接入，请在“发布账号”中选择已有账号，沿用同一标识。';
+    if (error.message === '这个发布账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的发布账号。') return '这个发布账号已关联原 API 客户端。要使用另一个客户端，请选择“接入新的发布账号”。';
+  }
+  if (action === 'releases.prepare' && error instanceof Error) {
+    if (error.message === 'all APKs must have the same package, version and signer') return '各渠道 APK 的包名、版本或签名不一致。请在“准备材料”中更换安装包后重新检查。';
+    if (error.message === 'APK 包名与应用配置不一致') return 'APK 的 Android 包名与此应用不符。请确认应用选择和各渠道安装包。';
+    if (error.message === 'debuggable APK cannot be published') return '选择的 APK 是调试包。请使用已签名的正式发布安装包。';
+    if (/^更新说明去掉首尾空白/.test(error.message)) return '更新说明至少需要 5 个字符，并使用常规文本与换行。请修改后重新检查。';
+    if (/更新说明最多 (200|500) 个字符/.test(error.message)) return '更新说明超出所选渠道的长度限制。vivo 最多 200 个字符，其他渠道最多 500 个字符。请缩短后重新检查。';
+    if (/^(xiaomi|oppo|vivo): configured app ID differs from APK package$/.test(error.message)) return '所选 APK 的 Android 包名与应用资料不符。请确认应用选择和各渠道安装包。';
+  }
+  return actionErrors[action] ?? '操作未完成。请查看应用当前状态和处理入口后重试。';
+}
+
+function safeResult(value: unknown, action: string): unknown {
+  if (Array.isArray(value)) return value.map(item => safeResult(item, action));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+    if (key === 'errors' && item && typeof item === 'object') return [key,
+      Object.fromEntries(Object.keys(item).map(channel => [channel, safeActionError(action, undefined)]))];
+    if (key === 'last_error' && item) return [key, '本次查询未能更新结果，请检查账号访问权限或网络后重新查询。'];
+    return [key, safeResult(item, action)];
+  }));
+}
 
 class RequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -135,7 +171,8 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
 }> {
   const token = crypto.randomBytes(32).toString('base64url');
   const root = options.root ?? dataRoot();
-  const uploads = path.join(root, 'web-uploads', crypto.randomUUID());
+  // Selected APKs remain available to saved drafts across browser/service restarts.
+  const uploads = path.join(root, 'web-uploads');
   privateDir(uploads);
   let origin = '';
   let expectedHost = '';
@@ -146,6 +183,8 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
     queue = result.then(() => undefined, () => undefined);
     return result;
   };
+  const workspace = new WebWorkspace(root);
+  const jobs = new WebJobs(work => serial(work), async (action, payload) => safeResult(await backend.invoke(action, payload), action), safeActionError);
   const server = http.createServer((request, response) => {
     headers(response);
     let activeAction = '';
@@ -174,7 +213,7 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
         const purpose = request.headers['x-upload-purpose'];
         if (purpose !== undefined && purpose !== 'app-icon') throw new RequestError(400, '文件用途无效。');
         const icon = purpose === 'app-icon';
-        const uploaded = await serial(() => upload(request, icon ? path.join(root, 'web-assets', 'icons') : uploads, icon));
+        const uploaded = await upload(request, icon ? path.join(root, 'web-assets', 'icons') : uploads, icon);
         json(response, 201, uploaded);
         return;
       }
@@ -188,18 +227,38 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
       const action = record.action;
       activeAction = action;
       try {
-        const value = await serial(() => backend.invoke(action, record.payload ?? {}));
+        const payload = record.payload ?? {};
+        if (action.startsWith('drafts.')) {
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('invalid draft');
+          const p = payload as Record<string, unknown>;
+          if (Object.keys(p).some(key => !['kind', 'id', 'value'].includes(key))) throw new Error('invalid draft fields');
+          if (action === 'drafts.get') json(response, 200, { draft: workspace.get(p.kind, p.id) });
+          else if (action === 'drafts.save') { workspace.save(p.kind, p.id, p.value); json(response, 200, { saved: true }); }
+          else { workspace.clear(p.kind, p.id); json(response, 200, { cleared: true }); }
+          return;
+        }
+        if (action.startsWith('jobs.')) {
+          const p = payload as Record<string, unknown>;
+          if (action === 'jobs.start') json(response, 202, { job: jobs.start(payload) });
+          else if (action === 'jobs.get') json(response, 200, { job: jobs.get(p?.id) });
+          else json(response, 200, { jobs: jobs.list() });
+          return;
+        }
+        // Reading saved facts must remain possible while a browser-independent job runs.
+        const cachedRead = ['apps.list', 'accounts.list', 'releases.list', 'doctor', 'protocols'].includes(action) ||
+          action === 'releases.get' && (payload as { refresh?: unknown }).refresh !== true;
+        const value = cachedRead ? await backend.invoke(action, payload) : await serial(() => backend.invoke(action, payload));
         if (action === 'accounts.update') {
           if (!value || typeof value !== 'object' || (value as { updated?: unknown }).updated !== true) throw new Error('credential update was not confirmed');
           json(response, 200, { updated: true });
-        } else json(response, 200, value);
+        } else json(response, 200, safeResult(value, action));
       } finally { if (action === 'accounts.update') clearCredentialPayload(record.payload); }
     })().catch(error => {
       if (response.headersSent) { response.destroy(); return; }
       // Vendor responses and arbitrary backend exceptions must not enter browser errors.
       json(response, error instanceof RequestError ? error.status : 400,
         { error: error instanceof RequestError || activeAction === 'accounts.update' && error instanceof CredentialInputError
-          ? error.message : actionErrors[activeAction] ?? '操作未完成。请检查输入、账号凭据和环境诊断后重试。',
+          ? error.message : safeActionError(activeAction, error),
           ...(activeAction === 'accounts.update' && error instanceof CredentialInputError ? { code: error.code } : {}) });
       request.resume();
     });
@@ -211,7 +270,6 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
     server.listen(options.port ?? 0, '127.0.0.1');
     await once(server, 'listening');
   } catch (error) {
-    fs.rmSync(uploads, { recursive: true, force: true });
     throw error;
   }
   const address = server.address();
@@ -229,7 +287,6 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
         server.closeIdleConnections();
       });
       await queue;
-      fs.rmSync(uploads, { recursive: true, force: true });
     },
   };
 }

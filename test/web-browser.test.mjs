@@ -48,8 +48,8 @@ test('Web credential entry preserves multiline materials and clears every comple
   page.on('console', message => logs.push(message.text()));
   page.on('request', request => { if (request.url().endsWith('/api/upload')) uploads++; });
   const row = channel => page.locator('tr').filter({ has: page.getByText(channel + '-main', { exact: true }) });
-  const open = async channel => { await row(channel).getByRole('button', { name: /^(接入凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
-  const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新凭据', exact: true }).waitFor(); };
+  const open = async channel => { await row(channel).getByRole('button', { name: /^(接入密钥|更新密钥)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
+  const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新密钥', exact: true }).waitFor(); };
   const empty = handle => handle.evaluate(form => [...form.querySelectorAll('input,textarea')].every(control => control.value === ''));
   const noPersistence = async marker => {
     assert.equal(await page.evaluate(value => JSON.stringify(state).includes(value), marker), false);
@@ -81,11 +81,13 @@ test('Web credential entry preserves multiline materials and clears every comple
   assert.deepEqual(updates.at(-1).files, {});
 
   await open('huawei');
+  await page.locator('#credential-mode-service_account_json').selectOption('file');
   await page.locator('#credential-file-service_account_json').fill('/private/synthetic/service-account.json');
   await page.getByRole('button', { name: '验证并保存', exact: true }).click(); await saved('huawei');
   assert.deepEqual(updates.at(-1).files, { service_account_json: '/private/synthetic/service-account.json' });
   assert.deepEqual(updates.at(-1).credentials, {});
   await open('huawei');
+  await page.locator('#credential-mode-service_account_json').selectOption('file');
   await page.locator('#credential-file-service_account_json').fill('/private/synthetic/wrong-permission.json');
   nextIssue = 'file';
   await page.getByRole('button', { name: '验证并保存', exact: true }).click();
@@ -126,6 +128,7 @@ test('Web credential entry preserves multiline materials and clears every comple
   await open('xiaomi');
   const replacementSecret = 'replacement value';
   await page.locator('#credential-api_secret').fill(replacementSecret);
+  await page.locator('#credential-mode-public_key_pem').selectOption('file');
   await page.locator('#credential-file-public_key_pem').fill('/private/synthetic/public.pem');
   await page.getByRole('button', { name: '验证并保存', exact: true }).click(); await saved('xiaomi');
   assert.deepEqual(updates.at(-1).credentials, { api_secret: replacementSecret });
@@ -139,11 +142,12 @@ test('Web credential entry preserves multiline materials and clears every comple
   await page.locator('#credential-client_secret').fill('synthetic-navigation-F9');
   const navigated = await page.locator('#credentials-form').elementHandle();
   await page.evaluate(() => { location.hash = '#/doctor'; });
-  await page.getByRole('heading', { name: '环境诊断', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '本机检查', exact: true }).waitFor();
   assert.equal(await empty(navigated), true); await navigated.dispose();
+  await page.getByText('版本与运行信息', { exact: true }).click();
   await page.getByText('0.0.0-test', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '安装 / 修复检查组件', exact: false }).click();
-  await page.getByText('发布组件检查通过。可以准备应用更新。').waitFor();
+  await page.getByRole('button', { name: '安装或修复检查组件', exact: false }).click();
+  await page.getByText('本机检查通过，可以检查安装包。').waitFor();
   assert.equal(repairs, 1);
 
   await page.goto(web.url + '/#/accounts'); await open('honor');

@@ -7,10 +7,10 @@ const names = {huawei:'华为',honor:'荣耀',xiaomi:'小米',oppo:'OPPO',vivo:'
 const channels = Object.keys(names);
 const credentialSpecs = {
   huawei:[{key:'service_account_json',label:'服务账号 JSON',material:'JSON'}],
-  honor:[{key:'client_secret',label:'client_secret'}],
+  honor:[{key:'client_secret',label:'API访问密钥（client_secret）'}],
   xiaomi:[{key:'api_secret',label:'API 密钥（api_secret）'},{key:'public_key_pem',label:'API 公钥或证书 PEM',material:'PEM'},{key:'test_account_json',label:'审核测试账号 JSON',material:'JSON',optional:true}],
-  oppo:[{key:'client_secret',label:'client_secret'}],
-  vivo:[{key:'access_secret',label:'access_secret'}],
+  oppo:[{key:'client_secret',label:'API访问密钥（client_secret）'}],
+  vivo:[{key:'access_secret',label:'API访问密钥（access_secret）'}],
   tencent:[{key:'api_secret',label:'API 密钥（api_secret）'}],
 };
 const credentialHints = {
@@ -20,12 +20,10 @@ const credentialHints = {
   format:'JSON 或 PEM 材料格式无效。请使用完整原文并保留原有换行，再重新输入。',
   account:'账号尚未关联应用。请先保存应用和对应渠道的账号资料，再重新接入。',
 };
-const state = {view:'apps',apps:[],app:null,appDraft:null,releases:[],release:null,wizard:null,accounts:[],diagnostic:null,protocols:[],busy:false,progress:'',notice:null};
-let navigationPending = false;
-let toastTimer;
-const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const formatDate = value => value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-const bytes = value => value >= 1024*1024 ? (value/1024/1024).toFixed(1)+' MB' : Math.ceil(value/1024)+' KB';
+
+const state = {view:'home',apps:[],overviews:[],accounts:[],app:null,releases:[],release:null,setup:null,publish:null,jobs:[],diagnostic:null,protocols:[],notice:null,busy:false,progress:'',credentialContext:null,saveStatus:'',newAppDraft:null,appSetupDraft:null,appReleaseDraft:null};
+let navigationPending=false,toastTimer,routeGeneration=0,polling=false;
+const jobContexts=new Map(),handledJobs=new Set(),draftTimers=new Map(),draftSaves=new Map(),draftVersions=new Map(),draftInFlight=new Map(),autoRefresh=new Map();
 const icons = {
   apps:'<rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5 6h6M5 9h4"/>',
   repo:'<path d="M3 1.8h9v12.4H3a1.5 1.5 0 0 1-1.5-1.5V3.3A1.5 1.5 0 0 1 3 1.8Zm-1.5 9.5H12M4 4.5h5"/>',
@@ -41,214 +39,155 @@ const icons = {
   search:'<circle cx="6.5" cy="6.5" r="4.5"/><path d="m10 10 4 4"/>',
   file:'<path d="M3 1.5h6L13 6v8.5H3v-13Zm6 0V6h4M5 9h6m-6 3h4"/>',
 };
-const icon = name => '<svg viewBox="0 0 16 16" aria-hidden="true">'+(icons[name] || icons.apps)+'</svg>';
-const badge = (text, kind = '') => '<span class="badge '+kind+'">'+esc(text)+'</span>';
-const btn = (text, action, kind = '', extra = '') => '<button type="button" class="btn '+kind+'" data-action="'+action+'" '+extra+(state.busy?' disabled':'')+'>'+text+'</button>';
-const link = (text, hash, kind = '') => '<a class="btn '+kind+'" href="'+esc(hash)+'">'+text+'</a>';
-const selectedApp = id => state.apps.find(app => app.project_id === id);
-const packageName = app => app.package_name || (app.channels.find(row => ['xiaomi','oppo','vivo'].includes(row.channel)) || {}).app_id || '商店应用';
-const localTime = () => {const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16);};
-function toast(message) { const target=$('#toast'); target.textContent=message;target.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>target.hidden=true,4200); }
-async function api(action, payload = {}) {
-  const response = await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Publisher-Token':token},body:JSON.stringify({action,payload})});
-  const result = await response.json();
-  if (!response.ok) {const error=new Error(action==='accounts.update'?'凭据接入未完成。':result.error || '请求未完成，请重试。');if(action==='accounts.update'&&['input','fields','file','format','account'].includes(result.code))error.credentialIssue=result.code;throw error;}
+
+const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const icon=name=>'<svg viewBox="0 0 16 16" aria-hidden="true">'+(icons[name]||icons.apps)+'</svg>';
+const badge=(text,kind='')=>'<span class="badge '+kind+'">'+esc(text)+'</span>';
+const btn=(text,action,kind='',extra='')=>'<button type="button" class="btn '+kind+'" data-action="'+action+'" '+extra+'>'+text+'</button>';
+const link=(text,href,kind='')=>'<a class="btn '+kind+'" href="'+esc(href)+'">'+text+'</a>';
+const formatDate=value=>value&&!Number.isNaN(Date.parse(value))?new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'尚无记录';
+const bytes=value=>value>=1024*1024?(value/1024/1024).toFixed(1)+' MB':Math.ceil(value/1024)+' KB';
+const baseName=value=>String(value||'').split(/[\\/]/).pop()||'已保存的 APK';
+const selectedApp=id=>state.apps.find(app=>app.project_id===id);
+const appName=value=>typeof value==='string'?(selectedApp(value)?.display_name||value):(value?.display_name||value?.project_id||'应用');
+const packageName=app=>app?.package_name||app?.channels.find(row=>['xiaomi','oppo','vivo'].includes(row.channel))?.app_id||'';
+const overview=id=>state.overviews.find(row=>row.app_id===id)||{app_id:id,channels:[]};
+const localTime=()=>{const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16);};
+const running=job=>['queued','running'].includes(job.status);
+const activeJobs=(id,action)=>state.jobs.filter(job=>running(job)&&(!id||job.app_id===id||job.release_id===id)&&(!action||job.action===action));
+const submitting=id=>activeJobs(id,'releases.submit').length>0;
+const fieldLabels={honor:['API 客户端编号','client_id','从荣耀 API 接入资料复制，例如 client-1001。'],xiaomi:['开发者账号','userName','小米自动发布 API 使用的开发者账号。'],oppo:['API 客户端编号','client_id','从 OPPO 开发者后台的 API 接入资料复制。'],vivo:['访问账号标识','access_key','从 vivo API 接入资料复制，与访问密钥配对。'],tencent:['主开发者用户编号','uid','应用宝主开发者账号的用户 ID，与应用编号分别填写。']};
+function toast(text){const target=$('#toast');target.textContent=text;target.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>target.hidden=true,4200);}
+async function api(action,payload={},keepalive=false){
+  const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Publisher-Token':token},body:JSON.stringify({action,payload}),keepalive});
+  const result=await response.json();
+  if(!response.ok){const error=new Error(action==='accounts.update'?'凭据接入未完成。':result.error||'操作未完成，请重试。');if(action==='accounts.update'&&['input','fields','file','format','account'].includes(result.code))error.credentialIssue=result.code;throw error;}
   return result;
 }
-async function upload(file, purpose) {
-  const headers={'Content-Type':'application/octet-stream','X-Publisher-Token':token,'X-Filename':encodeURIComponent(file.name)};
-  if(purpose)headers['X-Upload-Purpose']=purpose;
-  const response = await fetch('/api/upload',{method:'POST',headers,body:file});
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || '文件读取失败。');
-  return result.path;
+async function upload(file,purpose){const headers={'Content-Type':'application/octet-stream','X-Publisher-Token':token,'X-Filename':encodeURIComponent(file.name)};if(purpose)headers['X-Upload-Purpose']=purpose;const response=await fetch('/api/upload',{method:'POST',headers,body:file});const result=await response.json();if(!response.ok)throw new Error(result.error||'文件尚未保存，请重新选择。');return result.path;}
+async function refreshApps(){const result=await api('apps.list');state.apps=result.apps||[];state.overviews=result.overviews||[];}
+async function work(progress,callback){state.progress=progress;state.notice=null;render();try{await callback();}catch(error){state.notice={type:'error',text:error.message||'操作未完成。已有资料仍保留，请重试。'};}finally{state.progress='';render();}}
+function notice(){return(state.progress?'<div class="progress-label" role="status"><span class="spinner"></span>'+esc(state.progress)+'</div>':'')+(state.notice?'<div class="notice '+esc(state.notice.type)+'" role="alert">'+esc(state.notice.text)+'</div>':'');}
+function heading(title,description,actions=''){return'<div class="page-heading"><div><h1>'+title+'</h1>'+(description?'<p>'+description+'</p>':'')+'</div><div class="page-actions">'+actions+'</div></div>';}
+function empty(title,description,action=''){return'<div class="panel"><div class="empty-state"><div class="empty-icon">'+icon('repo')+'</div><h2>'+esc(title)+'</h2><p>'+esc(description)+'</p>'+action+'</div></div>';}
+function field(label,name,value='',hint='',type='text',required=false,disabled=false){return'<div class="field"><label for="'+name+'">'+esc(label)+'</label><input type="'+type+'" id="'+name+'" name="'+name+'" value="'+esc(value)+'" '+(required?'required ':'')+(disabled?'disabled ':'')+(name==='display_name'?'maxlength="80" ':'')+'autocomplete="off">'+(hint?'<span class="hint">'+esc(hint)+'</span>':'')+'</div>';}
+function saveLabel(){return'<span class="save-status" data-save-status role="status">'+esc(state.saveStatus||'更改会自动保存到本机')+'</span>';}
+function markSave(text){state.saveStatus=text;document.querySelectorAll('[data-save-status]').forEach(node=>node.textContent=text);}
+function appDraftValue(){const value=state.setup?.value;if(!value||state.setup.persistable===false)return null;return{schema_version:2,project_id:value.project_id,display_name:value.display_name||'',package_name:value.package_name||'',channels:value.channels.map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>['channel','account','app_id','client_id','language_id','icon_path','privacy_url'].includes(key))))};}
+function releaseDraftValue(){const p=state.publish;if(!p||p.mode==='retry'||p.phase==='tracking'||p.persistable===false)return null;return{app_id:p.appId,channels:[...p.channels],apks:Object.fromEntries(p.channels.filter(channel=>p.apks[channel]).map(channel=>[channel,p.apks[channel]])),release_notes:p.notes,...(p.releaseId?{release_id:p.releaseId}:{})};}
+function trackDraftWrite(key,task){const pending=draftInFlight.get(key)||new Set();pending.add(task);draftInFlight.set(key,pending);const clear=()=>pending.delete(task);task.then(clear,clear);return task;}
+function persistDraft(kind,id,value,immediate=false){if(!value)return Promise.resolve();const key=kind+':'+id;const version=(draftVersions.get(key)||0)+1;draftVersions.set(key,version);markSave('正在保存到本机…');clearTimeout(draftTimers.get(key));
+  return new Promise((resolve,reject)=>{const run=()=>{draftTimers.delete(key);const previous=draftSaves.get(key)||Promise.resolve();const task=previous.catch(()=>{}).then(()=>api('drafts.save',{kind,id,value}));draftSaves.set(key,task);trackDraftWrite(key,task);task.then(()=>{if(draftVersions.get(key)===version)markSave('已自动保存到本机');resolve();},error=>{markSave('暂未保存，请检查本机服务');if(immediate)reject(error);else resolve();});};if(immediate)run();else draftTimers.set(key,setTimeout(run,300));});}
+function saveSetup(immediate=false){return state.setup?persistDraft('app',state.setup.key,appDraftValue(),immediate):Promise.resolve();}
+function saveRelease(immediate=false){return state.publish&&state.publish.mode!=='retry'&&state.publish.persistable!==false?persistDraft('release',state.publish.appId,releaseDraftValue(),immediate):Promise.resolve();}
+function flushDrafts(){const values=[];if(state.view==='setup'&&state.setup&&state.setup.stage!=='complete'&&state.setup.persistable!==false)values.push(['app',state.setup.key,appDraftValue()]);if(state.view==='publish'&&state.publish?.mode!=='retry'&&state.publish?.persistable!==false&&state.publish?.phase!=='tracking')values.push(['release',state.publish?.appId,releaseDraftValue()]);for(const[kind,id,value]of values)if(id&&value){clearTimeout(draftTimers.get(kind+':'+id));void trackDraftWrite(kind+':'+id,api('drafts.save',{kind,id,value},true)).catch(()=>{});}}
+async function clearSavedDraft(kind,id){const key=kind+':'+id;clearTimeout(draftTimers.get(key));draftTimers.delete(key);draftVersions.set(key,(draftVersions.get(key)||0)+1);await Promise.allSettled([draftSaves.get(key)||Promise.resolve(),...(draftInFlight.get(key)||[])]);await api('drafts.clear',{kind,id});}
+function renderNavigation(){const current=state.view==='setup'?state.setup?.value.project_id:['app','publish','release'].includes(state.view)?state.app?.project_id||state.publish?.appId||state.release?.project_id:null;const items=state.apps.map(app=>'<a class="nav-item '+(current===app.project_id&&!['accounts','doctor','protocols'].includes(state.view)?'active':'')+'" href="#/app/'+encodeURIComponent(app.project_id)+'">'+icon('repo')+'<span class="nav-name">'+esc(appName(app))+'</span></a>').join('');$('#navigation').innerHTML='<a class="nav-item '+(state.view==='apps'?'active':'')+'" href="#/apps">'+icon('apps')+'全部应用<span class="count">'+state.apps.length+'</span></a>'+items+'<div class="nav-heading">辅助设置</div><a class="nav-item '+(state.view==='accounts'?'active':'')+'" href="#/accounts">'+icon('shield')+'发布账号</a><a class="nav-item '+(state.view==='doctor'?'active':'')+'" href="#/doctor">'+icon('terminal')+'本机检查</a><a class="nav-item '+(state.view==='protocols'?'active':'')+'" href="#/protocols">'+icon('history')+'商店支持情况</a>';}
+function render(){const active=document.activeElement;const focus=active&&main.contains(active)&&active.id?{id:active.id,start:active.selectionStart,end:active.selectionEnd}:null;renderNavigation();const views={apps:renderApps,app:renderApp,setup:renderSetup,publish:renderPublish,release:renderRelease,accounts:renderAccounts,doctor:renderDoctor,protocols:renderProtocols};main.innerHTML=(views[state.view]||renderApps)();for(const input of main.querySelectorAll('input[type="file"]')){const publish=state.publish,setup=state.setup;input.addEventListener('change',event=>{event.stopPropagation();void handleChange(event,publish,setup);});}if(focus){const target=document.getElementById(focus.id);if(target){target.focus({preventScroll:true});if(typeof focus.start==='number'&&target.setSelectionRange)try{target.setSelectionRange(focus.start,focus.end);}catch{}}}document.title=(state.app?appName(state.app)+' · ':'')+'应用发布';}
+function jobTitle(action){return({'releases.prepare':'检查发布材料','releases.preflight':'检查商店与发布账号','releases.review':'汇总待提交内容','releases.submit':'向商店提交版本','releases.get':'查询审核与上架结果','releases.reconcile':'检查原提交是否完成','apps.check':'验证渠道访问权限','doctor.repair':'安装或修复检查组件'})[action]||'处理本机任务';}
+function taskBanner(id){const jobs=activeJobs(id).filter(job=>job.action!=='releases.get');if(!jobs.length)return'';return'<div class="running-tasks" role="status">'+jobs.map(job=>'<div><span class="spinner"></span><strong>'+esc(jobTitle(job.action))+'</strong><span class="muted">'+(job.status==='queued'?'等待执行':'正在处理')+'</span>'+(job.release_id&&state.view!=='release'?link('看处理进度','#/release/'+encodeURIComponent(job.release_id),'small'):'')+'</div>').join('')+'<p>任务由本机服务继续处理。可以切换页面或关闭浏览器，回来后查看进度。</p></div>';}
+async function startJob(action,payload,context={}){const appId=context.appId||payload.app_id||state.release?.project_id||state.publish?.appId;const releaseId=payload.release_id;const existing=state.jobs.find(job=>running(job)&&job.action===action&&(releaseId?job.release_id===releaseId:job.app_id===appId)&&(action!=='apps.check'||jobContexts.get(job.request_id)?.kind===context.kind&&jobContexts.get(job.request_id)?.channel===context.channel)&&(action==='releases.submit'||!['releases.prepare','releases.preflight','releases.review'].includes(action)||Boolean(context.flowId)&&jobContexts.get(job.request_id)?.flowId===context.flowId&&jobContexts.get(job.request_id)?.revision===context.revision));if(existing)return existing;const requestId=crypto.randomUUID();const pending={id:'starting-'+requestId,request_id:requestId,action,status:'queued',app_id:appId,release_id:releaseId,created_at:new Date().toISOString()};state.jobs.push(pending);jobContexts.set(requestId,context);render();try{const result=await api('jobs.start',{action,payload,request_id:requestId});state.jobs=state.jobs.filter(job=>job.id!==pending.id);const job={...pending,...result.job,app_id:result.job.app_id||pending.app_id,release_id:result.job.release_id||pending.release_id};state.jobs.push(job);render();if(!running(job))await finishJob(job,context);return job;}catch(error){state.jobs=state.jobs.filter(job=>job.id!==pending.id);state.notice={type:'error',text:error.message||'任务未启动。已有资料仍保留，请重试。'};render();throw error;}}
+async function finishJob(job,context){if(handledJobs.has(job.id))return;handledJobs.add(job.id);const result=job.result;if(job.status==='failed'){if(context.kind==='publish'&&state.publish?.appId===context.appId&&state.publish.flowId===context.flowId&&state.publish.revision===context.revision){state.publish.phase='checking';state.publish.checkError=job.error||'检查未完成，请重新检查。';}state.notice={type:'error',text:(typeof job.error==='string'?job.error:'本次操作未完成。')+' 已有资料和处理进度已保留。'};if(job.release_id&&state.view==='release')await refreshCachedRelease(job.release_id);render();return;}
+  if(job.action==='doctor.repair')state.diagnostic=result;
+  if(job.action==='apps.check'){await refreshApps();if(context.kind==='setup'&&state.setup?.value.project_id===context.appId)await advanceSetup(context.channel);}
+  if(job.action==='releases.get'||job.action==='releases.reconcile'){rememberRelease(result.release,result.errors||{});if(job.action==='releases.reconcile'&&result.release?.recovery_required)state.notice={type:'warn',text:'仍未找到足够回执，暂时不能确认原提交是否完成。已保留记录并停止重复提交，请进一步核查商店后台；其它渠道仍可处理。后台查看记录不会替代原请求回执。'};}
+  if(context.kind==='publish'&&state.publish?.appId===context.appId&&state.publish.flowId===context.flowId&&state.publish.revision===context.revision){const p=state.publish;if(result?.release){p.release=result.release;p.releaseId=result.release.batch_id;if(p.mode!=='retry')await saveRelease(true);}if(job.action==='releases.prepare'){p.related=result.related_release||null;if(result.duplicate&&p.release.has_writes){p.persistable=false;try{await clearSavedDraft('release',p.appId);}catch{}state.appReleaseDraft=null;state.release=p.release;state.view='release';history.replaceState(null,'','#/release/'+encodeURIComponent(p.releaseId));state.notice={type:'info',text:'材料与已有发布相同，已打开原发布记录。已完成的提交会保留，请按各渠道的下一步处理。'};render();return;}p.phase='checking';await startJob('releases.preflight',{release_id:p.releaseId,channels:p.channels},{kind:'publish',appId:p.appId,flowId:p.flowId,revision:p.revision});}else if(job.action==='releases.preflight'){p.errors=result.errors||{};p.checkError='';p.phase='checking';if(!Object.keys(p.errors).length&&!p.release.targets.some(row=>p.channels.includes(row.channel)&&row.recovery_required&&!submitting(p.releaseId)))await requestReview();}else if(job.action==='releases.review'){p.plan=result.plan;p.phase='confirm';}}
+  if(job.action==='releases.submit'){await refreshApps();if(result?.release){if(state.release?.batch_id===job.release_id)state.release={...result.release,errors:result.errors||{}};if(state.view==='publish'&&state.publish?.releaseId===job.release_id){state.release={...result.release,errors:result.errors||{}};state.view='release';history.replaceState(null,'','#/release/'+encodeURIComponent(job.release_id));}}}
+  if(['apps.check','releases.prepare','releases.submit','releases.reconcile'].includes(job.action))await refreshApps();render();}
+async function pollJobs(){if(polling)return;polling=true;try{const result=await api('jobs.list');const old=JSON.stringify(state.jobs.map(job=>[job.id,job.status]));state.jobs=result.jobs||[];for(const job of state.jobs)if(!running(job)&&!handledJobs.has(job.id)){const context=jobContexts.get(job.request_id);if(context)await finishJob(job,context);else handledJobs.add(job.id);}if(old!==JSON.stringify(state.jobs.map(job=>[job.id,job.status])))render();if(document.visibilityState==='visible'){const trackedRelease=state.view==='release'?state.release:state.view==='app'?overview(state.app?.project_id).latest_release:null;const id=trackedRelease?.batch_id;if(id){if(submitting(id)){await refreshCachedRelease(id);}else if(needsResultRefresh(trackedRelease)&&Date.now()-(autoRefresh.get(id)||0)>30000&&!activeJobs(id,'releases.get').length){autoRefresh.set(id,Date.now());void startJob('releases.get',{release_id:id,refresh:true},{kind:'query',quiet:true}).catch(()=>{});}}}}catch{/* The last visible data remains available while the local service is unreachable. */}finally{polling=false;}}
+function rememberRelease(release,errors){if(!release)return;if(state.release?.batch_id===release.batch_id)state.release={...release,errors:errors||state.release.errors||{}};for(const info of state.overviews)if(info.latest_release?.batch_id===release.batch_id)info.latest_release=release;state.releases=state.releases.map(row=>row.batch_id===release.batch_id?release:row);}
+function needsResultRefresh(release){if(!release?.has_writes&&!release?.recovery_required)return false;return release.targets.some(row=>row.recovery_required||row.execution_phase==='submitted'&&row.review_state!=='rejected'&&row.availability_state!=='live'&&effectiveManual(release,row)?.availability_state!=='live'&&(row.query_support?.review!==false&&row.review_state!=='approved'||row.query_support?.availability!==false));}
+async function refreshCachedRelease(id){const result=await api('releases.get',{release_id:id,refresh:false});rememberRelease(result.release);if(state.view==='release'&&state.release?.batch_id===id||state.view==='app'&&overview(state.app?.project_id).latest_release?.batch_id===id)render();return result.release;}
+
+function renderApps(){
+  let html=heading('应用','选择应用，发新版本、看发布结果，或处理没完成的渠道。',link(icon('plus')+' 添加应用','#/setup/new','primary'))+notice()+taskBanner();
+  if(state.newAppDraft)html+='<div class="notice"><strong>有一份尚未完成的应用接入资料。</strong> '+link('继续接入','#/setup/new','small')+'</div>';
+  if(!state.apps.length)return html+empty('先添加要发布的应用','填写应用名称、选择已开通的商店，再逐渠道接入发布账号。资料会自动保存。',link('添加应用','#/setup/new','primary'));
+  html+='<div class="cards">';
+  for(const app of state.apps){const info=overview(app.project_id),latest=info.latest_release,ready=info.channels.filter(row=>row.saved&&row.connected).length;html+='<article class="app-card"><div class="app-card-top">'+icon('repo')+'<h2><a href="#/app/'+encodeURIComponent(app.project_id)+'">'+esc(appName(app))+'</a></h2></div><div class="package">'+esc(packageName(app))+'</div><div class="channel-tags">'+app.channels.map(row=>badge(names[row.channel])).join('')+'</div><p class="small-muted">'+ready+' / '+app.channels.length+' 个渠道已接入</p>'+(latest?'<div class="card-result">'+esc(conclusion(latest).text)+'<div class="cell-note">版本 '+esc(latest.version_name)+' · '+formatDate(latest.created_at)+'</div></div>':'<div class="card-result muted">还没有提交过版本</div>')+'<div class="app-card-footer">'+link('进入应用 '+icon('arrow'),'#/app/'+encodeURIComponent(app.project_id),'small')+'</div></article>';}
+  return html+'</div>';
 }
-async function work(progress, callback) {
-  if (state.busy) return;
-  $('#toast').hidden=true;clearTimeout(toastTimer);
-  state.busy=true;state.progress=progress;state.notice=null;render();
-  try { await callback(); }
-  catch (error) { state.notice={type:'error',text:error.message || '操作未完成。'}; }
-  finally { state.busy=false;state.progress='';render();if(navigationPending){navigationPending=false;await navigate();} }
+function appBreadcrumb(app,suffix){return'<div class="breadcrumbs"><a href="#/apps">应用</a><span>/</span><a href="#/app/'+encodeURIComponent(app.project_id)+'">'+esc(appName(app))+'</a>'+(suffix?'<span>/</span>'+esc(suffix):'')+'</div>';}
+function conclusion(release){
+  const targets=release?.targets||[],total=release?.total_targets||targets.length,accepted=targets.filter(row=>row.execution_phase==='submitted').length;
+  if(submitting(release?.batch_id))return{text:'正在向商店提交，已提交 '+accepted+' / '+total+' 个渠道',tone:'info'};
+  const pending=targets.filter(row=>row.recovery_required);
+  if(pending.length)return{text:accepted+' 个渠道已提交，'+pending.length+' 个提交结果待确认',tone:'warn'};
+  if(!release?.has_writes&&!accepted)return{text:'材料已保存，尚未确认提交',tone:''};
+  if(accepted<total)return{text:accepted+' / '+total+' 个渠道已提交，其余渠道还需处理',tone:'warn'};
+  const automaticLive=targets.filter(row=>row.availability_state==='live').length,manualLive=targets.filter(row=>row.availability_state!=='live'&&effectiveManual(release,row)?.availability_state==='live').length;if(automaticLive+manualLive===total&&total)return{text:manualLive?'全部 '+total+' 个渠道已有上架结果：自动确认 '+automaticLive+'，人工记录 '+manualLive:'本次版本已在全部 '+total+' 个渠道上架',tone:'success'};
+  const rejected=targets.filter(row=>row.review_state==='rejected'||effectiveManual(release,row)?.review_state==='rejected').length;
+  if(rejected)return{text:'提交已完成，'+rejected+' 个渠道审核未通过',tone:'warn'};
+  return{text:'所选 '+total+' 个渠道均已提交，'+(automaticLive||manualLive?'已上架：自动确认 '+automaticLive+'、人工记录 '+manualLive+'；其余继续跟踪':'继续跟踪审核与上架'),tone:'success'};
 }
-function notice() {
-  let html=state.progress?'<div class="progress-label" role="status"><span class="spinner"></span>'+esc(state.progress)+'</div>':'';
-  if(state.notice)html+='<div class="notice '+esc(state.notice.type)+'" role="alert">'+esc(state.notice.text)+'</div>';
+function renderApp(){
+  const app=state.app;if(!app)return notice();const info=overview(app.project_id),latest=info.latest_release,ready=info.channels.filter(row=>row.saved&&row.connected).length,setupDraft=state.newAppDraft?.project_id===app.project_id||Boolean(state.appSetupDraft),publishDraft=state.appReleaseDraft;
+  let html=appBreadcrumb(app,'')+heading(esc(appName(app)),esc(packageName(app)),btn(icon('plus')+' 发新版本','new-release','primary','data-app="'+esc(app.project_id)+'"')+link('应用资料与渠道','#/setup/'+encodeURIComponent(app.project_id)))+notice()+taskBanner(app.project_id);
+  const needs=info.channels.filter(row=>!row.saved||!row.connected);
+  if(setupDraft)html+='<div class="notice warn"><strong>应用接入尚未完成。</strong> '+link('继续接入所选渠道',state.newAppDraft?.project_id===app.project_id?'#/setup/new':'#/setup/'+encodeURIComponent(app.project_id),'small')+'</div>';
+  if(publishDraft)html+='<section class=\"result-lead\"><div><span class=\"eyebrow\">当前发布草稿</span><h2>材料已保存在本机，可以继续准备</h2><p>'+Object.keys(publishDraft.apks||{}).length+'个渠道已选择安装包，更新说明'+(publishDraft.release_notes?'已填写':'待填写')+'。</p></div>'+link('继续这份草稿','#/publish/'+encodeURIComponent(app.project_id),'primary')+'</section>';
+  if(latest){const summary=conclusion(latest);html+='<section class="result-lead '+summary.tone+'"><div><span class="eyebrow">最近一次发布 · '+esc(latest.version_name)+'（'+esc(latest.version_code)+'）</span><h2>'+esc(summary.text)+'</h2><p>'+formatDate(latest.created_at)+'</p></div>'+link(latest.recovery_required&&!submitting(latest.batch_id)?'处理待确认的提交':'看发布结果','#/release/'+encodeURIComponent(latest.batch_id),'primary')+'</section>';}
+  else html+='<section class="result-lead"><div><span class="eyebrow">发布</span><h2>'+(needs.length?'先完成渠道接入，再发新版本':'应用已准备好，可以发第一个版本')+'</h2><p>每个渠道明确选择对应安装包，检查后统一确认提交。</p></div></section>';
+  html+='<div class="overview-columns"><section class="panel"><div class="panel-header">接下来要做</div><div class="task-list">';
+  if(needs.length)for(const row of needs)html+='<div class="task-row"><div><strong>'+esc(names[row.channel])+'：'+(!row.saved?'接入发布账号':'检查应用访问权限')+'</strong><p>'+esc(row.issue||(!row.saved?'保存密钥并验证此应用的发布权限。':'账号资料已保存，需确认当前绑定可访问。'))+'</p></div>'+(!row.saved?btn('接入'+esc(names[row.channel])+'账号','fix-account','small','data-app="'+app.project_id+'" data-channel="'+row.channel+'"'):btn('重新检查'+esc(names[row.channel]),'check-channel','small','data-app="'+app.project_id+'" data-channel="'+row.channel+'"'))+'</div>';
+  if(latest)html+=releaseTaskRows(latest);
+  if(!needs.length&&!latest)html+='<div class="task-row"><div><strong>渠道接入已完成</strong><p>发版时提供各渠道安装包和一份更新说明。</p></div>'+'</div>';
+  html+='</div></section><section class="panel"><div class="panel-header"><span>已配置渠道</span><span class="small-muted">'+ready+' / '+app.channels.length+' 已接入</span></div><ul class="channel-readiness">'+app.channels.map(row=>{const status=info.channels.find(item=>item.channel===row.channel)||{};return'<li><span>'+esc(names[row.channel])+'</span>'+badge(status.saved&&status.connected?'已接入':status.saved?'需重新检查':'待接入',status.saved&&status.connected?'success':'warn')+'<span class="cell-note">'+(status.checked_at?formatDate(status.checked_at):'还没有验证记录')+'</span></li>';}).join('')+'</ul></section></div>';
+  html+='<div class="toolbar"><h2>发布记录</h2><span class="small-muted">已提交的版本与本机保存的准备记录</span></div>'+releaseList(state.releases,app.project_id);
   return html;
 }
-function heading(title, description, actions = '') {
-  return '<div class="page-heading"><div><h1>'+title+'</h1>'+(description?'<p>'+description+'</p>':'')+'</div><div class="page-actions">'+actions+'</div></div>';
+function releaseList(releases,appId){const submitted=releases.filter(row=>row.has_writes),drafts=releases.filter(row=>!row.has_writes);function rows(items){return'<div class="table-wrap"><table><thead><tr><th>版本</th><th>当前结果</th><th>建立时间</th><th></th></tr></thead><tbody>'+items.map(row=>'<tr><td><strong>'+esc(row.version_name)+'（'+esc(row.version_code)+'）</strong></td><td>'+esc(conclusion(row).text)+'</td><td class="small-muted">'+formatDate(row.created_at)+'</td><td>'+link('看结果','#/release/'+encodeURIComponent(row.batch_id),'small')+'</td></tr>').join('')+'</tbody></table></div>';}
+  let html=submitted.length?'<div class="panel">'+rows(submitted)+'</div>':empty('还没有提交记录','本机保存的材料可以继续修改。确认提交后，在这里跟踪各渠道结果。','');
+  if(drafts.length)html+='<details class="technical-details"><summary>未提交的准备记录（'+drafts.length+'）</summary><p class="footnote">这些记录保留检查过的材料，无需逐条完成。更改材料后的当前草稿会继续用于下一次检查。</p><div class="panel">'+rows(drafts)+'</div></details>';return html;
 }
-function empty(title, description, action = '') {
-  return '<div class="panel"><div class="empty-state"><div class="empty-icon">'+icon('repo')+'</div><h2>'+esc(title)+'</h2><p>'+esc(description)+'</p>'+action+'</div></div>';
+function setupStatus(channel){const setup=state.setup,info=overview(setup.value.project_id).channels.find(row=>row.channel===channel),draft=setup.value.channels.find(row=>row.channel===channel),saved=selectedApp(setup.value.project_id)?.channels.find(row=>row.channel===channel);return Boolean(info?.saved&&info?.connected&&draft&&saved&&['account','app_id','client_id','icon_path','privacy_url'].every(key=>(draft[key]||'')===(saved[key]||'')));}
+function setupSteps(step){return'<ol class="steps" aria-label="应用接入步骤">'+['应用信息','选择商店','接入发布账号'].map((text,index)=>'<li class="step '+(step===index+1?'active':step>index+1?'done':'')+'"><span class="step-number">'+(step>index+1?'✓':index+1)+'</span>'+text+'</li>').join('')+'</ol>';}
+function renderSetup(){
+  const setup=state.setup;if(!setup)return notice();const value=setup.value,app=selectedApp(value.project_id),selected=value.channels;
+  let html='<div class="breadcrumbs"><a href="#/apps">应用</a><span>/</span>'+esc(value.display_name||'添加应用')+'</div>'+heading(app?'应用资料与渠道':'添加应用',setup.stage==='complete'?'资料已保存。可以从应用主页继续。':'按步骤接入。应用资料会自动保存，密钥在验证后另行安全保存。')+setupSteps(setup.step)+notice()+taskBanner(value.project_id)+(setup.key==='new-app'&&state.newAppDraft?'<div class="toolbar"><span class="small-muted">正在继续本机保存的接入资料。</span>'+btn('重新添加另一个应用','restart-setup','small')+'</div>':'');
+  if(setup.stage==='complete'){const pending=selected.filter(row=>!setupStatus(row.channel));return html+'<section class="result-lead '+(pending.length?'warn':'success')+'"><div><h2>'+esc(pending.length?'资料已保存，仍有 '+pending.length+' 个渠道待接入':'所选渠道均已接入')+'</h2><p>'+esc(appName(value))+' · '+esc(value.package_name)+'</p></div></section><div class="form-actions">'+(pending.length?btn('继续接入'+esc(names[pending[0].channel]),'setup-resume','primary'):'')+link(setup.returnTo==='publish'?'返回发布草稿':'进入应用',setup.returnTo==='publish'?'#/publish/'+encodeURIComponent(value.project_id):'#/app/'+encodeURIComponent(value.project_id),'primary')+'</div>';}
+  html+='<form id="setup-form" class="form-layout">';
+  if(setup.step===1)html+='<div class="panel"><div class="panel-header">应用信息</div><div class="panel-body">'+field('应用名称','display_name',value.display_name,'使用实际名称，例如“阅读助手”。支持中文。','text',true)+field('Android 包名','package_name',value.package_name,'与商店里已有应用的包名一致，例如 com.example.app。','text',true)+'<details class="technical-details"><summary>高级：命令行短名</summary>'+field('命令行短名','project_id',value.project_id,'工具已自动生成，日常使用应用名称即可。','text',true,Boolean(app))+'</details></div></div><div class="form-actions">'+btn('下一步：选择商店 '+icon('arrow'),'setup-next','primary')+saveLabel()+'</div>';
+  if(setup.step===2)html+='<div class="panel"><div class="panel-header">选择已经开通的商店</div><div class="panel-body"><p class="footnote">只接入这个应用需要发布的渠道。每次发版默认选择这里配置好的全部渠道。</p><div class="store-selection">'+channels.map(channel=>{const configured=Boolean(app?.channels.some(row=>row.channel===channel));return'<label class="store-choice '+(selected.some(row=>row.channel===channel)?'selected':'')+'"><input type="checkbox" data-setup-select="'+channel+'" '+(selected.some(row=>row.channel===channel)?'checked ':'')+(configured?'disabled':'')+'><span><strong>'+esc(names[channel])+'</strong><small>'+(configured?'已配置，将保留':'接入此商店的应用与发布账号')+'</small></span></label>';}).join('')+'</div>'+(app?.channels.length?'<details class="technical-details"><summary>管理已配置的渠道</summary><p>移除只影响以后的发布，已有发布记录和结果会保留。</p>'+app.channels.map(row=>'<div class="task-row"><strong>'+esc(names[row.channel])+'</strong>'+btn('移除'+esc(names[row.channel])+'渠道','remove-config-channel','small danger','data-app="'+app.project_id+'" data-channel="'+row.channel+'"')+'</div>').join('')+'</details>':'')+'</div></div><div class="form-actions">'+btn('下一步：接入发布账号 '+icon('arrow'),'setup-next','primary')+btn('返回应用信息','setup-back')+saveLabel()+'</div>';
+  if(setup.step===3){const index=Math.min(setup.index,selected.length-1),row=selected[index];if(!row)return html+'</form>';const existing=state.accounts.filter(item=>item.channel===row.channel),reused=existing.find(item=>item.account===row.account),status=overview(value.project_id).channels.find(item=>item.channel===row.channel),client=fieldLabels[row.channel];html+='<div class="setup-channel-tabs" aria-label="渠道接入进度">'+selected.map((item,n)=>btn((setupStatus(item.channel)?'✓ ':'')+esc(names[item.channel]),'setup-channel',index===n?'selected':'','data-index="'+n+'"')).join('')+'</div><div class="panel"><div class="panel-header"><span>'+esc(names[row.channel])+' · '+(index+1)+' / '+selected.length+'</span>'+badge(setupStatus(row.channel)?'已接入':'待验证',setupStatus(row.channel)?'success':'')+'</div><div class="panel-body"><h2 class="form-section-title">这个商店中的应用</h2>'+(['xiaomi','oppo','vivo'].includes(row.channel)?'<div class="field"><span class="field-label">应用包名</span><p class="mono">'+esc(value.package_name)+'</p><span class="hint">此商店直接使用包名查找应用，无需再填应用编号。</span></div>':field('商店应用编号（App ID）','channel-app_id',row.app_id||'','从'+names[row.channel]+'后台该应用的基本资料复制，例如 100001；它标识应用，不是账号。','text',true))+'<hr class="section-divider"><h2 class="form-section-title">用哪个发布账号</h2><div class="field"><label for="account-choice">发布账号</label><select id="account-choice"><option value="new" '+(!reused?'selected':'')+'>接入新的发布账号</option>'+existing.map(account=>'<option value="'+esc(account.account)+'" '+(row.account===account.account?'selected':'')+'>'+esc(account.client_id||account.account)+' · '+(account.saved?'已保存密钥，可复用':'待接入密钥')+'</option>').join('')+'</select><span class="hint">同一发布账号可以用于多个应用，已保存的密钥直接复用。</span></div>'+(client?field(client[0]+'（'+client[1]+'）','channel-client_id',row.client_id||'',client[2],'text',true,Boolean(reused?.saved)):'<p class="footnote">华为服务账号信息在下一步提供的 JSON 材料中读取。</p>')+'<details class="technical-details"><summary>高级：本机账号标识</summary>'+field('本机账号标识','channel-account',row.account,'工具用它关联同一个发布账号，已复用账号的标识保持不变。','text',true,Boolean(reused))+'</details>';
+    if(row.channel==='xiaomi')html+='<hr class="section-divider"><h2 class="form-section-title">审核所需资料</h2><div class="form-grid">'+field('应用图标（必填）','channel-icon_path',row.icon_path||'','从本机选择 PNG/JPEG，也可填写图片绝对路径。','text',true)+field('隐私政策网页（必填）','channel-privacy_url',row.privacy_url||'','应用对外提供的 HTTPS 隐私政策地址。','url',true)+'</div><label class="btn small" for="setup-icon">'+icon('upload')+' 选择图标图片</label><input class="file-native" id="setup-icon" type="file" accept="image/png,image/jpeg">';
+    html+='<p class="footnote">验证只检查账号能否访问这个应用，'+names[row.channel]+'不会收到提审请求。</p>'+(status?.issue?'<div class="notice warn">'+esc(status.issue)+'</div>':'')+'</div></div><div class="form-actions">'+btn(setupStatus(row.channel)?'重新验证'+esc(names[row.channel]):reused?.saved?'验证并接入'+esc(names[row.channel]):'保存资料并接入'+esc(names[row.channel])+'密钥','setup-connect','primary','data-channel="'+row.channel+'"')+btn(index+1===selected.length?'暂存并查看接入结果':'暂存，先接入下一渠道','setup-later')+btn('返回选择商店','setup-back')+'</div><div class="form-footer">'+saveLabel()+'</div>';}
+  return html+'</form>';
 }
-function renderNavigation() {
-  const isApps=['apps','app','appForm','publish','release'].includes(state.view);
-  const navItem=(view,label,symbol,count='')=>'<a href="#/'+view+'" class="nav-item '+((view==='apps'?isApps:state.view===view)?'active':'')+'">'+icon(symbol)+label+(count?'<span class="count">'+count+'</span>':'')+'</a>';
-  $('#navigation').innerHTML=navItem('apps','应用','apps',String(state.apps.length))+'<div class="nav-heading">管理</div>'+navItem('accounts','账号与凭据','shield')+navItem('doctor','环境诊断','terminal')+navItem('protocols','渠道能力','history');
+function publishSteps(phase){const step=phase==='materials'?1:phase==='tracking'?3:2;return'<ol class="steps" aria-label="发布步骤">'+['准备材料','检查并确认','提交与跟踪'].map((name,index)=>'<li class="step '+(step===index+1?'active':step>index+1?'done':'')+'"><span class="step-number">'+(step>index+1?'✓':index+1)+'</span>'+name+'</li>').join('')+'</ol>';}
+function renderPublish(){
+  const p=state.publish,app=selectedApp(p?.appId);if(!p||!app)return notice();let html=appBreadcrumb(app,p.mode==='retry'?'重试未完成渠道':'发新版本')+heading(p.mode==='retry'?'重试未完成渠道':'发新版本',esc(appName(app))+' · '+esc(packageName(app)))+publishSteps(p.phase)+notice()+taskBanner(p.releaseId||p.appId);
+  if(p.phase==='materials')return html+renderMaterials(app,p);
+  if(p.phase==='confirm')return html+renderConfirmation(p);
+  if(p.phase==='tracking')return html+link('看实时处理进度','#/release/'+encodeURIComponent(p.releaseId),'primary');
+  return html+renderChecks(p);
 }
-function render() {
-  renderNavigation();
-  const views={apps:renderApps,app:renderApp,appForm:renderAppForm,publish:renderWizard,release:renderRelease,accounts:renderAccounts,doctor:renderDoctor,protocols:renderProtocols};
-  main.innerHTML=(views[state.view]||renderApps)();
-  document.querySelectorAll('button').forEach(button=>{if(state.busy && !button.classList.contains('modal-close'))button.disabled=true;});
+function renderMaterials(app,p){let html=p.restored?'<div class="notice">本机草稿已恢复。可以继续修改材料，检查后再确认提交。</div>':'';html+='<div class="panel"><div class="panel-header"><span>给各渠道的安装包</span>'+saveLabel()+'</div>';for(const row of app.channels){const included=p.channels.includes(row.channel),saved=p.apks[row.channel],loading=p.uploading[row.channel];html+='<div class="artifact-row"><div class="artifact-channel"><label class="checkbox-label"><input type="checkbox" data-publish-channel="'+row.channel+'" '+(included?'checked':'')+'>'+esc(names[row.channel])+'</label></div><div class="artifact-input">'+(included?'<label class="file-picker" role="button" tabindex="0" for="apk-'+row.channel+'">'+icon('file')+'<span><span class="file-name">'+esc(loading?'正在保存 '+loading+' 到本机…':saved?baseName(saved):'选择'+names[row.channel]+'对应的 APK')+'</span><span class="file-meta">'+(saved&&!loading?' · 已保存在本机':'')+'</span></span><span class="spacer"></span><span class="small-muted">'+(saved?'更换':'选择文件')+'</span></label><input class="file-native" type="file" id="apk-'+row.channel+'" data-apk="'+row.channel+'" accept=".apk">':'<span class="small-muted">本次不向此渠道提交</span>')+'</div></div>';}html+='</div><div class="panel"><div class="panel-header">本次更新说明</div><div class="panel-body"><div class="field"><label for="release-notes">更新说明（所选渠道共用）</label><textarea id="release-notes" maxlength="500" placeholder="说明这个版本带来的变化…">'+esc(p.notes)+'</textarea><div class="counter" id="notes-count">'+[...p.notes].length+' / '+(p.channels.includes('vivo')?'200':'500')+' 字符</div></div><label class="btn small" for="notes-file">从文本文件读取</label><input class="file-native" id="notes-file" type="file" accept=".txt,.md,text/plain,text/markdown"></div></div><div class="form-actions">'+btn('检查材料并核对提交内容 '+icon('arrow'),'publish-check','primary',Object.keys(p.uploading).length?'disabled':'')+link('返回应用','#/app/'+encodeURIComponent(p.appId))+'</div><p class="footnote">此时仅保存本机材料并读取商店资料。最后一次确认后才上传到商店并提审。</p>';return html;}
+function renderChecks(p){let html='<div class="panel"><div class="panel-header">提交前检查</div><div class="panel-body"><p>检查安装包、发布账号和商店里的应用版本。材料仍可修改，更改后会重新检查。</p>'+(p.checkError?'<div class="notice error">'+esc(p.checkError)+' 材料已保留，可以重新检查。</div>':'')+'</div>';if(p.release){html+='<div class="table-wrap"><table><thead><tr><th>本次提交</th><th>渠道</th><th>检查结果</th><th>下一步</th></tr></thead><tbody>';for(const row of p.release.targets){const error=p.errors[row.channel],blocked=row.recovery_required&&!submitting(p.releaseId),selected=p.channels.includes(row.channel);html+='<tr><td><input type="checkbox" data-check-channel="'+row.channel+'" aria-label="本次提交'+esc(names[row.channel])+'" '+(selected?'checked':'')+(p.mode==='retry'?' disabled':'')+'></td><td><strong>'+esc(names[row.channel])+'</strong></td><td>'+badge(blocked?'需先检查原提交结果':error?'需要处理':row.execution_phase==='preflighted'||row.execution_phase==='submitted'?'已通过':'检查中',error||blocked?'warn':row.execution_phase==='preflighted'||row.execution_phase==='submitted'?'success':'')+(error?'<div class="cell-note">'+esc(error)+'</div>':'')+'</td><td>'+((error||blocked)?blocked?btn('检查'+esc(names[row.channel])+'提交结果','check-result','small','data-release="'+p.releaseId+'" data-channel="'+row.channel+'"'):btn('修复'+esc(names[row.channel])+'发布账号','fix-account','small','data-app="'+p.appId+'" data-release="'+p.releaseId+'" data-channel="'+row.channel+'"')+btn('修改商店资料','edit-channel','small','data-app="'+p.appId+'" data-channel="'+row.channel+'"'):'')+'</td></tr>';}html+='</tbody></table></div>';}html+='</div><div class="form-actions">'+btn('重新检查所选渠道','publish-recheck','primary')+(p.mode!=='retry'?btn('返回修改材料','publish-edit'):'')+saveLabel()+'</div>';return html;}
+function renderConfirmation(p){const plan=p.plan,release=p.release;if(!plan)return renderChecks(p);let html=(p.related?'<div class="notice">安装包与已有发布相同，但更新说明、应用资料或本次渠道已有变化。请重新核对下方内容。 '+link('查看原发布','#/release/'+encodeURIComponent(p.related),'small')+'</div>':'')+'<div class="notice warn"><strong>确认后，向以下 '+plan.selected_channels.length+' 个渠道上传 APK 并提交审核。</strong> 审核通过后立即上架。</div><div class="panel"><div class="panel-header">即将提交的内容</div><div class="panel-body"><dl class="summary-grid"><div class="summary-item"><dt>应用</dt><dd>'+esc(appName(p.appId))+'</dd></div><div class="summary-item"><dt>版本</dt><dd>'+esc(plan.version_name)+'（'+esc(plan.version_code)+'）</dd></div><div class="summary-item"><dt>包名</dt><dd class="mono">'+esc(plan.package_name)+'</dd></div><div class="summary-item"><dt>提交后</dt><dd>审核通过后立即上架</dd></div></dl></div><div class="table-wrap"><table><thead><tr><th>渠道</th><th>安装包</th><th>使用的商店应用 / 账号</th></tr></thead><tbody>';for(const channel of plan.selected_channels){const row=release.targets.find(item=>item.channel===channel)||{},identity=(plan.target_accounts||[]).find(item=>item.channel===channel)||row;html+='<tr><td><strong>'+esc(names[channel])+'</strong></td><td>'+esc(row.artifact?.filename||baseName(p.apks[channel]))+'</td><td>'+esc(identity.app_id||'')+'<div class="cell-note">'+esc(identity.account||'')+'</div></td></tr>';}html+='</tbody></table></div></div><div class="panel"><div class="panel-header">更新说明</div><div class="panel-body"><p class="notes">'+esc(plan.release_notes)+'</p></div></div>'+(p.attemptOnly?'<div class="notice">这次只重试上述渠道，其它渠道的结果和待处理事项会保留。</div>':'')+'<div class="form-actions">'+btn(p.attemptOnly?'确认重试上述渠道':'确认上传并提交审核','publish-submit','primary')+btn(p.mode==='retry'?'返回发布结果':'返回修改材料',p.mode==='retry'?'retry-cancel':'publish-edit')+'</div><details class="technical-details"><summary>技术校验详情</summary><p>证书 SHA-256：<code>'+esc(plan.signer_sha256)+'</code></p>'+plan.selected_channels.map(channel=>'<p>'+esc(names[channel])+' APK SHA-256：<code>'+esc(plan.artifact_sha256[channel])+'</code></p>').join('')+'</details>';return html;}
+function effectiveManual(release,row){return(row.manual_observations||(release.manual_observations||[]).filter(item=>item.channel===row.channel)).at(-1);}
+function statusBadge(row,kind){if(kind==='execution'){if(row.execution_phase==='submitted')return badge('商店已接收','success');if(submitting(state.release?.batch_id||state.publish?.releaseId))return badge(row.last_operation?.effect==='intent'?'正在处理':'等待处理','info');if(row.recovery_required)return badge('结果待确认','warn');return badge(row.execution_attempted?'尚未完成':'尚未提交',row.execution_attempted?'warn':'');}if(row.execution_phase!=='submitted'){if(submitting(state.release?.batch_id||state.publish?.releaseId))return badge('提交处理中','info');return badge(row.recovery_required?'先确认提交结果':'尚未提交',row.recovery_required?'warn':'');}const value=row[kind==='review'?'review_state':'availability_state'];return badge(({in_review:'审核中',approved:'已通过',rejected:'未通过',live:'已上架',not_live:'未上架'})[value]||(row.query_support?.[kind==='review'?'review':'availability']===false?'到后台查看':'暂未确认'),['approved','live'].includes(value)?'success':value==='rejected'?'danger':value==='in_review'?'info':'');}
+function backofficeNeeded(release,row){const manual=effectiveManual(release,row);return{rejected:row.review_state==='rejected'||manual?.review_state==='rejected',review:row.review_state==='unknown'&&row.query_support?.review===false&&(!manual?.review_state||manual.review_state==='unknown'),availability:row.availability_state==='unknown'&&row.query_support?.availability===false&&(!manual?.availability_state||manual.availability_state==='unknown')};}
+function manualCell(manual,kind){if(!manual)return'';const value=kind==='review'?manual.review_state:manual.availability_state,label=kind==='review'?({in_review:'审核中',approved:'审核已通过',rejected:'审核未通过'})[value]:({live:'已上架',not_live:'未上架'})[value];return'<div class=\"manual-record\">后台记录：'+esc(label||(kind==='review'?'审核还不能确认':'上架还不能确认'))+'<br>'+formatDate(manual.observed_at)+'</div>'; }
+function releaseTaskRows(release){if(!release)return'';const rows=release.targets||[];if(submitting(release.batch_id))return'<div class="task-row"><div><strong>本机服务正在提交</strong><p>可以离开此页。已收到的商店回执会立即保存。</p></div>'+link('看处理进度','#/release/'+encodeURIComponent(release.batch_id),'small')+'</div>';let html='';for(const row of rows){const attrs='data-release="'+release.batch_id+'" data-app="'+release.project_id+'" data-channel="'+row.channel+'"';if(row.recovery_required)html+='<div class="task-row"><div><strong>'+esc(names[row.channel])+'：先确认上次提交是否完成</strong><p>工具尚未拿到足以确认结果的回执，暂时不会重复发送。</p></div>'+btn('检查提交结果','check-result','small primary',attrs)+btn('后台查看并记录','manual','small',attrs)+'</div>';else if(row.execution_phase!=='submitted'&&release.has_writes)html+='<div class="task-row"><div><strong>'+esc(names[row.channel])+'：提交还没完成</strong><p>其它商店已接收渠道会保留结果。</p></div>'+btn('重试'+esc(names[row.channel]),'retry-channel','small primary',attrs)+btn('修复发布账号','fix-account','small',attrs)+'</div>';else if(row.execution_phase==='submitted'&&Object.values(backofficeNeeded(release,row)).some(Boolean))html+='<div class="task-row"><div><strong>'+esc(names[row.channel])+'：'+(backofficeNeeded(release,row).rejected?'审核未通过':backofficeNeeded(release,row).review&&backofficeNeeded(release,row).availability?'到后台查看审核和上架结果':backofficeNeeded(release,row).review?'到后台查看审核结果':'到后台查看上架结果')+'</strong><p>'+(backofficeNeeded(release,row).rejected?'在商店后台查看原因，再准备需要修改的版本。':'尚未得到这项结果，已有后台记录会保留，可以补充查看。')+'</p></div>'+btn('后台查看并记录','manual','small',attrs)+'</div>';else if(row.query_status==='failed')html+='<div class="task-row"><div><strong>'+esc(names[row.channel])+'：这次查询没成功</strong><p>上次结果已保留，可以重新查询。</p></div>'+btn('重新查询结果','refresh-release','small',attrs)+'</div>';}
+  if(!html&&release.can_edit&&!release.has_writes)html='<div class="task-row"><div><strong>材料已保存，等待确认</strong><p>还可以更换安装包、修改说明或调整本次渠道。</p></div>'+btn('继续准备并确认','edit-release','small primary','data-release="'+release.batch_id+'" data-app="'+release.project_id+'"')+'</div>';
+  return html||'<div class="task-row"><div><strong>当前没有需要立即处理的事项</strong><p>后续查询会保留审核与上架的最新结果。</p></div></div>';
 }
-function renderApps() {
-  let html=heading('应用','管理商店资料，发布各渠道版本，跟踪每一次更新。',link(icon('plus')+' 新建应用','#/app/new','primary'))+notice();
-  if(!state.apps.length)return html+empty('配置你的第一个应用','保存应用和渠道账号资料，之后每次发版都可以复用。首次配置无需提供 APK。',link(icon('plus')+' 新建应用','#/app/new','primary'))+
-    '<div class="onboarding-note">'+icon('terminal')+' 也可以在终端运行 <code>android-release app add</code>。两种入口共用本机配置和发布记录。</div>';
-  html+='<div class="toolbar"><div class="search-box">'+icon('search')+'<input type="search" id="app-search" placeholder="查找应用或包名…" aria-label="查找应用"></div><span class="small-muted">'+state.apps.length+' 个应用配置</span></div><div class="cards">';
-  for(const app of state.apps)html+='<article class="app-card" data-app-search="'+esc((app.project_id+' '+packageName(app)).toLowerCase())+'"><div class="app-card-top">'+icon('repo')+'<h2><a href="#/app/'+encodeURIComponent(app.project_id)+'">'+esc(app.project_id)+'</a></h2>'+badge('本机')+'</div><div class="package">'+esc(packageName(app))+'</div><div class="channel-tags">'+app.channels.map(row=>badge(names[row.channel])).join('')+'</div><div class="app-card-footer"><span>'+app.channels.length+' 个渠道</span>'+link('准备发布 '+icon('arrow'),'#/publish/'+encodeURIComponent(app.project_id),'small')+'</div></article>';
-  return html+'</div><div class="onboarding-note">默认向应用已配置的全部渠道发布。每个渠道的 APK 由你明确选择，提交前统一核对。</div>';
+function renderRelease(){
+  const release=state.release;if(!release)return notice();const app=selectedApp(release.project_id)||{project_id:release.project_id},summary=conclusion(release),runningSubmit=submitting(release.batch_id),total=release.total_targets||release.targets.length;
+  let html=appBreadcrumb(app,'发布结果')+heading(esc(appName(app))+' · '+esc(release.version_name),esc(release.package_name)+' · 版本代码 '+esc(release.version_code),btn(activeJobs(release.batch_id,'releases.get').length?'正在更新结果…':'重新查询结果','refresh-release','','data-release="'+release.batch_id+'" '+(activeJobs(release.batch_id,'releases.get').length?'disabled':'')))+notice()+taskBanner(release.batch_id)+'<section class="result-lead '+summary.tone+'"><div><span class="eyebrow">这次发布的结果</span><h2>'+esc(summary.text)+'</h2><p>建立于 '+formatDate(release.created_at)+'</p></div></section><section class="panel"><div class="panel-header">接下来要做</div><div class="task-list">'+releaseTaskRows(release)+'</div></section>';
+  html+='<div class="panel"><div class="panel-header"><span>各渠道结果</span><span class="small-muted">先展示本机记录，查询后更新</span></div><div class="table-wrap"><table><thead><tr><th>渠道</th><th>提交</th><th>审核</th><th>上架</th><th>查询时间</th><th>操作</th></tr></thead><tbody>';
+  for(const row of release.targets){const manual=effectiveManual(release,row),step=({authorize:'获取上传地址',upload:'上传安装包',bind:'关联安装包',metadata:'保存更新说明',submit:'提交审核'})[row.last_operation?.step];html+='<tr><td><strong>'+esc(names[row.channel])+'</strong><div class="cell-note">'+esc(row.artifact?.filename||'')+'</div></td><td>'+statusBadge(row,'execution')+(runningSubmit&&step?'<div class="cell-note">'+esc(step)+(row.last_operation.effect==='confirmed_applied'?'已完成':'')+'</div>':'')+'</td><td>'+statusBadge(row,'review')+manualCell(manual,'review')+'</td><td>'+statusBadge(row,'availability')+manualCell(manual,'availability')+'</td><td><span class="small-muted">'+formatDate(row.last_success_at)+'</span>'+(row.query_status==='failed'?'<div class="cell-note">本次查询未成功，上次结果保留</div>':'')+'</td><td>'+(row.execution_phase==='submitted'||row.recovery_required?btn('后台查看并记录','manual','small','data-release="'+release.batch_id+'" data-channel="'+row.channel+'"'):'<span class="small-muted">提交后查看结果</span>')+'</td></tr>';}
+  html+='</tbody></table></div></div><div class="panel"><div class="panel-header">本次更新说明</div><div class="panel-body"><p class="notes">'+esc(release.release_notes||'')+'</p></div></div><div class="form-actions">'+(release.can_edit&&!release.has_writes&&!runningSubmit?btn('修改本次材料','edit-release','','data-release="'+release.batch_id+'" data-app="'+release.project_id+'"'):btn('准备另一次发布','new-release','','data-app="'+release.project_id+'"'))+link('返回应用','#/app/'+encodeURIComponent(release.project_id))+'</div><details class="technical-details"><summary>处理记录与技术详情</summary><p>内部记录：<code>'+esc(release.batch_id)+'</code>。自动确认：商店接收 '+esc(release.accepted_targets)+' / '+total+'，审核通过 '+esc(release.approved_targets)+'，已上架 '+esc(release.live_targets)+'。</p>'+release.targets.map(row=>'<p>'+esc(names[row.channel])+'：'+esc(row.execution_phase)+'；'+esc(row.last_operation?.step||'')+' '+esc(row.last_operation?.effect||'')+'</p>').join('')+'</details>';return html;
 }
-function appBreadcrumb(app, suffix) {
-  return '<div class="breadcrumbs"><a href="#/apps">应用</a><span>/</span><a href="#/app/'+encodeURIComponent(app.project_id)+'">'+esc(app.project_id)+'</a>'+(suffix?'<span>/</span>'+esc(suffix):'')+'</div>';
-}
-function renderApp() {
-  const app=state.app;if(!app)return notice();
-  let html=appBreadcrumb(app,'')+heading(esc(app.project_id)+' '+badge('本机'),esc(packageName(app)),link(icon('shield')+' 账号与凭据','#/accounts')+btn(icon('check')+' 检查渠道访问','check-app')+link(icon('plus')+' 新建发布','#/publish/'+encodeURIComponent(app.project_id),'primary'))+notice();
-  html+='<div class="tabs"><span class="tab active">'+icon('history')+' 发布记录 <span class="count">'+state.releases.length+'</span></span><a class="tab" href="#/app/'+encodeURIComponent(app.project_id)+'/settings">'+icon('settings')+' 应用配置</a></div>';
-  if(!state.releases.length)return html+empty('发布你的第一个版本','为每个渠道选择 APK，再提供一份更新说明。工具会完成检查，并在上传前请你确认。',link('准备发布','#/publish/'+encodeURIComponent(app.project_id),'primary'));
-  return html+releaseList(state.releases);
-}
-function releaseList(releases) {
-  let html='<div class="panel"><div class="panel-header"><span>'+icon('history')+' 发布记录</span><span class="small-muted">最近更新在前</span></div><div class="table-wrap"><table><thead><tr><th>版本</th><th>渠道受理</th><th>审核 / 上架</th><th>创建时间</th><th></th></tr></thead><tbody>';
-  for(const release of releases)html+='<tr><td><div class="row-title"><a href="#/release/'+encodeURIComponent(release.batch_id)+'"><strong>'+esc(release.version_name||release.version_code||'查看发布')+'</strong></a>'+badge(release.version_code||'版本记录')+'</div><div class="cell-note mono">'+esc(release.package_name||release.project_id)+'</div></td><td>'+badge((release.accepted_targets||0)+' / '+(release.total_targets||(release.targets||[]).length)+' 已受理',release.all_accepted?'success':release.recovery_required?'warn':'')+(release.recovery_required?'<div class="cell-note">存在待核对请求</div>':'')+'</td><td><span class="small-muted">'+(release.approved_targets||0)+' 审核通过 · '+(release.live_targets||0)+' 已上架</span></td><td class="small-muted">'+formatDate(release.created_at)+'</td><td>'+link('查看详情','#/release/'+encodeURIComponent(release.batch_id),'small')+'</td></tr>';
-  return html+'</tbody></table></div></div>';
-}
-function field(label, name, value='', hint='', type='text', required=false, disabled=false) {
-  return '<div class="field"><label for="'+name+'">'+esc(label)+(required?'<span class="required">*</span>':'')+'</label><input type="'+type+'" id="'+name+'" name="'+name+'" value="'+esc(value)+'" '+(required?'required ':'')+(disabled?'disabled ':'')+'autocomplete="off">'+(hint?'<span class="hint">'+esc(hint)+'</span>':'')+'</div>';
-}
-function renderAppForm() {
-  const app=state.appDraft||state.app||{project_id:'',package_name:'',channels:channels.map(channel=>({channel,account:channel+'-main',app_id:''}))};
-  const editing=Boolean(state.app);
-  let html=(editing?appBreadcrumb(state.app,'应用配置'):'<div class="breadcrumbs"><a href="#/apps">应用</a><span>/</span>新建应用</div>')+heading(editing?'应用配置':'新建应用',editing?'修改长期资料。已有发布继续使用冻结时的配置。':'一次配置应用与渠道资料，供日常发版复用。')+notice();
-  html+='<form id="app-form" class="form-layout"><div class="panel"><div class="panel-header">应用信息</div><div class="panel-body"><div class="form-grid">'+field('应用名称','project_id',app.project_id,'本机使用的名称，例如 demo。', 'text',true,editing)+field('应用包名','package_name',packageName(app)==='商店应用'?'':packageName(app),'例如 com.example.app，须与本次应用的渠道包一致。','text',true)+'</div><p class="footnote">首次配置只保存长期资料。各渠道 APK 在发版时提供。</p></div></div><div class="toolbar"><h2>渠道与商店应用</h2><span class="small-muted">选择需要配置的渠道</span></div>';
-  for(const channel of channels){
-    const saved=app.channels.find(row=>row.channel===channel);
-    const row=saved||{channel,account:channel+'-main',app_id:''};
-    const clientLabels={honor:'client_id',xiaomi:'userName',oppo:'client_id',vivo:'access_key',tencent:'uid'};
-    html+='<section class="channel-config"><div class="channel-config-header"><label class="checkbox-label"><input type="checkbox" name="channel" value="'+channel+'" '+(saved?'checked':'')+'>'+esc(names[channel])+'</label><span class="hint">'+esc(channel)+'</span></div><div class="channel-fields" '+(!saved?'hidden':'')+'><div class="form-grid">'+field('账号备注',channel+'_account',row.account,'同一个渠道账号沿用相同备注。');
-    if(['huawei','honor','tencent'].includes(channel))html+=field('商店 App ID',channel+'_app_id',row.app_id,'从该应用的商店后台复制。');
-    if(clientLabels[channel])html+=field(clientLabels[channel],channel+'_client_id',row.client_id||(channel==='oppo'?row.account:''),'渠道 API 的公开账号标识，密钥在账号与凭据中另行接入。');
-    html+='</div>';
-    if(channel==='xiaomi')html+='<div class="form-grid">'+field('应用图标绝对路径',channel+'_icon_path',row.icon_path||'','小米 API 需要此图标。可填写本机路径或选择图标文件。')+field('隐私政策地址',channel+'_privacy_url',row.privacy_url||'','HTTPS 网页地址，不带查询参数或片段。','url')+'</div><div class="field"><label class="btn small" for="xiaomi-icon">'+icon('upload')+' 选择图标文件</label><input type="file" id="xiaomi-icon" class="file-native" accept="image/png,image/jpeg"></div>';
-    if(row.language_id)html+='<p class="small-muted">保留更新说明语言：'+esc(row.language_id)+'</p>';
-    html+='</div></section>';
-  }
-  html+='<div class="notice">'+icon('shield')+' 保存后可在“账号与凭据”直接接入并验证密钥，日常发布会自动复用本机保存的凭据。</div><div class="form-actions"><button class="btn primary" type="submit">'+(editing?'保存应用配置':'创建应用配置')+'</button>'+link('取消',editing?'#/app/'+encodeURIComponent(app.project_id):'#/apps')+'</div></form>';
-  return html;
-}
-function steps(current) {
-  return '<ol class="steps" aria-label="发布步骤">'+['发布材料','渠道预检','核对提交','受理结果'].map((label,index)=>'<li class="step '+(index+1===current?'active':index+1<current?'done':'')+'"><span class="step-number">'+(index+1<current?'✓':index+1)+'</span>'+label+'</li>').join('')+'</ol>';
-}
-function renderWizard() {
-  const wizard=state.wizard;if(!wizard)return notice();
-  const app=selectedApp(wizard.appId);if(!app)return notice();
-  let html=appBreadcrumb(app,'发布更新')+heading('发布应用更新','为 '+esc(app.project_id)+' 提交新版本。默认包含全部已配置渠道。')+steps(wizard.step)+notice();
-  if(wizard.step===1)return html+renderMaterials(app,wizard);
-  if(wizard.step===2)return html+renderPreflight(wizard);
-  if(wizard.step===3)return html+renderConfirmation(wizard);
-  return html+renderReleaseDetails(wizard.release,true);
-}
-function renderMaterials(app,wizard) {
-  let html='';
-  if(wizard.previous)html+='<div class="notice"><strong>发现尚未完成的发布：'+esc(wizard.previous.version_name||wizard.previous.version_code)+'</strong><p>可以继续已有记录，复用原 APK、更新说明和渠道进度。</p>'+btn('继续这次发布','continue-record','small','data-release="'+esc(wizard.previous.batch_id)+'"')+'</div>';
-  html+='<div class="panel"><div class="panel-header"><span>渠道 APK</span><span class="small-muted">逐渠道指定，文件名不参与匹配</span></div>';
-  for(const row of app.channels){
-    const included=wizard.channels.includes(row.channel);const file=wizard.files[row.channel];
-    html+='<div class="artifact-row"><div class="artifact-channel"><label class="checkbox-label"><input type="checkbox" data-select-channel="'+row.channel+'" '+(included?'checked':'')+'>'+esc(names[row.channel])+'</label></div><div class="artifact-input">';
-    if(included)html+='<label class="file-picker" tabindex="0" role="button" for="apk-'+row.channel+'">'+icon('file')+'<span><span class="file-name">'+(file?esc(file.name):'选择 '+esc(names[row.channel])+' 对应的 APK')+'</span><span class="file-meta">'+(file?' · '+bytes(file.size):' · .apk 文件')+'</span></span><span class="spacer"></span><span class="small-muted">浏览</span></label><input class="file-native" type="file" id="apk-'+row.channel+'" data-apk="'+row.channel+'" accept=".apk">';
-    else html+='<span class="small-muted">本次跳过此渠道</span>';
-    html+='</div></div>';
-  }
-  html+='</div><div class="panel"><div class="panel-header">更新说明</div><div class="panel-body"><div class="field"><label for="release-notes">全部选定渠道共用</label><textarea id="release-notes" placeholder="输入或粘贴本次更新说明…" maxlength="500">'+esc(wizard.notes)+'</textarea><div class="counter" id="notes-count">'+[...wizard.notes].length+' / '+(wizard.channels.includes('vivo')?'200':'500')+' 字符</div></div><label class="btn small" for="notes-file">'+icon('file')+' 从文本文件读取</label><input class="file-native" type="file" id="notes-file" accept=".txt,.md,text/plain,text/markdown"></div></div><div class="form-actions">'+btn(icon('check')+' 检查并准备发布','prepare','primary')+link('取消','#/app/'+encodeURIComponent(app.project_id))+'</div><p class="footnote">此阶段检查并保存本次材料。上传和提审将在核对内容并确认后开始。</p>';
-  return html;
-}
-function renderPreflight(wizard) {
-  if(!wizard.release)return '<div class="loading-state">正在准备发布…</div>';
-  const targets=wizard.release.targets||[];
-  let html=wizard.relatedRelease?'<div class="notice warn">相同产物已有发布记录，当前更新说明或应用配置发生了变化。本次已建立新的发布记录，请重新核对并明确确认提交范围。<br><a href="#/release/'+encodeURIComponent(wizard.relatedRelease)+'">查看原发布记录</a></div>':'';
-  html+='<div class="notice">检查各渠道账号和商店现状。失败的渠道可在修复后重新检查，也可明确取消勾选，调整本次提交范围。</div><div class="panel"><div class="panel-header"><span>渠道就绪情况</span>'+btn(icon('refresh')+' 重新检查','preflight','small')+'</div><div class="table-wrap"><table><thead><tr><th>本次纳入</th><th>渠道</th><th>账号 / 商店应用</th><th>预检结果</th></tr></thead><tbody>';
-  for(const row of targets){
-    const accepted=row.execution_phase==='submitted';
-    const error=wizard.errors[row.channel];const blocked=row.recovery_required;
-    const checked=wizard.channels.includes(row.channel);
-    html+='<tr><td><input type="checkbox" aria-label="纳入'+esc(names[row.channel])+'" data-review-channel="'+row.channel+'" '+(checked?'checked ':'')+(accepted?'disabled':'')+'></td><td><strong>'+esc(names[row.channel])+'</strong></td><td>'+esc(row.account||'')+'<div class="cell-note mono">'+esc(row.app_id||'')+'</div></td><td>'+badge(accepted?'已经受理':blocked?'待核对':error?'未就绪':row.execution_phase==='preflighted'?'检查通过':'等待检查',accepted?'success':error||blocked?'warn':row.execution_phase==='preflighted'?'success':'')+(error?'<div class="cell-note">'+esc(error)+'</div>':'')+(blocked?'<div class="cell-note">存在未决请求，先核对结果。</div>':'')+'</td></tr>';
-  }
-  html+='</tbody></table></div></div><div class="form-actions">'+btn('核对提交内容 '+icon('arrow'),'review','primary')+link('返回发布记录','#/app/'+encodeURIComponent(wizard.appId))+'</div>';
-  return html;
-}
-function renderConfirmation(wizard) {
-  const release=wizard.release,plan=wizard.plan;
-  if(!release||!plan)return '<div class="notice warn">请先完成渠道预检。</div>';
-  const completed=release.targets.filter(row=>plan.selected_channels.includes(row.channel)&&row.execution_phase==='submitted').length;
-  let html='<div class="notice warn"><strong>确认后将上传 APK 并提交审核。</strong> 审核通过后立即上架。请核对应用、渠道与对应产物。</div><div class="panel"><div class="panel-header">本次提交内容</div><div class="panel-body"><dl class="summary-grid"><div class="summary-item"><dt>应用</dt><dd>'+esc(wizard.appId)+'</dd></div><div class="summary-item"><dt>包名</dt><dd class="mono">'+esc(plan.package_name||release.package_name)+'</dd></div><div class="summary-item"><dt>版本</dt><dd>'+esc(plan.version_name||release.version_name)+'（'+esc(plan.version_code||release.version_code)+'）</dd></div><div class="summary-item"><dt>提交范围</dt><dd>'+plan.selected_channels.map(channel=>esc(names[channel])).join('、')+'</dd></div><div class="summary-item wide"><dt>签名证书 SHA-256</dt><dd class="mono">'+esc(plan.signer_sha256||'')+'</dd></div></dl></div><div class="table-wrap"><table><thead><tr><th>渠道</th><th>账号 / 商店应用</th><th>APK</th><th>产物 SHA-256</th></tr></thead><tbody>';
-  for(const channel of plan.selected_channels){
-    const row=release.targets.find(target=>target.channel===channel)||{};const artifact=row.artifact||{};const identity=(plan.target_accounts||[]).find(target=>target.channel===channel)||row;
-    html+='<tr><td><strong>'+esc(names[channel])+'</strong>'+(row.execution_phase==='submitted'?'<div class="cell-note">'+badge('已受理，将跳过','success')+'</div>':'')+'</td><td>'+esc(identity.account||'')+'<div class="cell-note mono">'+esc(identity.app_id||'')+'</div></td><td>'+esc(artifact.filename||'已冻结 APK')+(artifact.size?'<div class="cell-note">'+bytes(artifact.size)+'</div>':'')+'</td><td class="mono">'+esc((plan.artifact_sha256[channel]||'').slice(0,16))+'…</td></tr>';
-  }
-  html+='</tbody></table></div></div><div class="panel"><div class="panel-header">更新说明</div><div class="panel-body"><p class="notes">'+esc(plan.release_notes||release.release_notes)+'</p></div></div>'+(completed?'<div class="notice">'+completed+' 个已受理渠道将保留原结果，工具只继续尚未完成的步骤。</div>':'')+'<div class="form-actions">'+btn(completed?'确认并继续 '+(plan.selected_channels.length-completed)+' 个未完成渠道':'确认并提交 '+plan.selected_channels.length+' 个渠道','submit','primary')+btn('返回调整范围','back-preflight')+'</div><p class="footnote">点击确认即授权向上述渠道提交此应用和这些产物。受理结果、审核结果和上架结果分别记录。</p>';
-  return html;
-}
-function statusBadge(row, kind) {
-  if(kind==='execution'){
-    if(row.execution_phase==='submitted')return badge('已受理','success');
-    if(row.recovery_required)return badge('待核对','warn');
-    return badge(({prepared:'待提交',preflighted:'已就绪',submitted:'已受理',unknown:'待核对'})[row.execution_phase]||'未确认',row.execution_phase==='submitted'?'success':row.execution_phase==='unknown'?'warn':'');
-  }
-  if(kind==='review'){
-    const value=row.review_state;
-    return badge(({in_review:'审核中',approved:'审核通过',rejected:'审核拒绝'})[value]||(row.query_support&&row.query_support.review===false?'待人工核对':'未确认'),value==='approved'?'success':value==='rejected'?'danger':value==='in_review'?'info':'');
-  }
-  if(kind==='availability'){
-    const value=row.availability_state;
-    return badge(({live:'已上架',not_live:'未上架'})[value]||(row.query_support&&row.query_support.availability===false?'待人工核对':'未确认'),value==='live'?'success':'');
-  }
-  return badge(({ok:'成功',failed:'本次失败',never:'尚未查询'})[row.query_status]||'尚未查询',row.query_status==='failed'?'danger':row.query_status==='ok'?'success':'');
-}
-function manualRows(release, row) {
-  const records=row.manual_observations||(release.manual_observations||[]).filter(record=>record.channel===row.channel);
-  if(!records.length)return '';
-  const record=records[records.length-1];
-  const review=record.review_state||record.review;
-  const availability=record.availability_state||record.availability;
-  return '<div class="manual-record"><strong>人工核对</strong> · '+esc(({in_review:'审核中',approved:'审核通过',rejected:'审核拒绝'})[review]||'审核未确认')+' / '+esc(({live:'已上架',not_live:'未上架'})[availability]||'上架未确认')+'<br>'+esc(record.source||'商店后台')+' · '+formatDate(record.observed_at||record.recorded_at)+'</div>';
-}
-function renderReleaseDetails(release, inWizard=false) {
-  if(!release)return '';
-  const total=release.total_targets||(release.targets||[]).length;
-  let html='<div class="stats"><div class="stat"><div class="stat-label">提交受理</div><div class="stat-value">'+(release.accepted_targets||0)+' <span>/ '+total+' 个渠道</span></div></div><div class="stat"><div class="stat-label">审核通过 · 自动确认</div><div class="stat-value">'+(release.approved_targets||0)+' <span>/ '+total+'</span></div></div><div class="stat green"><div class="stat-label">已上架 · 自动确认</div><div class="stat-value">'+(release.live_targets||0)+' <span>/ '+total+'</span></div></div><div class="stat"><div class="stat-label">需要核对</div><div class="stat-value">'+(release.targets||[]).filter(row=>row.recovery_required).length+' <span>个渠道</span></div></div></div>';
-  if(release.all_accepted)html+='<div class="notice success">所有选定渠道均已受理本次提交。审核与上架进度请继续查询。</div>';
-  else if(release.recovery_required)html+='<div class="notice warn">部分请求结果未决。请先按渠道核对原请求，工具会保留记录并阻止冲突提交。</div>';
-  else html+='<div class="notice">本次发布尚有渠道未受理。可继续尚未完成的渠道，已受理的渠道会自动跳过。</div>';
-  html+='<div class="panel"><div class="panel-header"><span>'+icon('history')+' 各渠道进度</span>'+btn(icon('refresh')+' 查询最新结果','refresh','small')+'</div><div class="table-wrap"><table><thead><tr><th>渠道 / 产物</th><th>提交</th><th>审核</th><th>上架</th><th>查询情况</th><th></th></tr></thead><tbody>';
-  for(const row of release.targets||[]){
-    html+='<tr><td><strong>'+esc(names[row.channel])+'</strong><div class="cell-note">'+esc((row.artifact||{}).filename||'')+'</div></td><td>'+statusBadge(row,'execution')+((release.errors||{})[row.channel]?'<div class="cell-note">'+esc(release.errors[row.channel])+'</div>':'')+'</td><td>'+statusBadge(row,'review')+manualRows(release,row)+'</td><td>'+statusBadge(row,'availability')+'</td><td>'+statusBadge(row,'query')+(row.last_success_at?'<div class="cell-note">上次成功<br>'+formatDate(row.last_success_at)+'</div>':'')+(row.last_error?'<div class="cell-note">'+esc(row.last_error)+'</div>':'')+'</td><td>'+btn('人工核对','manual','small','data-channel="'+row.channel+'"')+'</td></tr>';
-  }
-  html+='</tbody></table></div></div>';
-  const recovery=(release.targets||[]).flatMap(row=>(row.recovery||[]).map(issue=>({...issue,channel:row.channel})));
-  if(recovery.length)html+='<div class="panel"><div class="panel-header">待核对事项</div><ul class="check-list">'+recovery.map(issue=>'<li><span>'+badge(names[issue.channel],'warn')+'</span><div class="check-content"><div class="check-title">'+esc(issue.message||'请求结果待核对')+'</div><div class="check-detail">'+esc(issue.next_action||'请在商店后台核对本次版本与原操作。')+'</div></div></li>').join('')+'</ul></div>';
-  html+='<div class="panel"><div class="panel-header">发布材料</div><div class="panel-body"><dl class="summary-grid"><div class="summary-item"><dt>版本</dt><dd>'+esc(release.version_name||'')+'（'+esc(release.version_code||'')+'）</dd></div><div class="summary-item"><dt>创建时间</dt><dd>'+formatDate(release.created_at)+'</dd></div><div class="summary-item wide"><dt>包名</dt><dd class="mono">'+esc(release.package_name||'')+'</dd></div><div class="summary-item wide"><dt>更新说明</dt><dd><p class="notes">'+esc(release.release_notes||'')+'</p></dd></div></dl></div></div>';
-  html+='<div class="form-actions">'+(!release.all_accepted?btn('继续未完成渠道 '+icon('arrow'),'continue','primary'):'')+(release.recovery_required?btn('只读核对未决请求','reconcile'):'')+link('返回应用','#/app/'+encodeURIComponent(release.project_id||state.wizard?.appId||''))+'</div>';
-  return html;
-}
-function renderRelease() {
-  const release=state.release;if(!release)return notice();
-  const app=selectedApp(release.project_id)||{project_id:release.project_id||'应用'};
-  return appBreadcrumb(app,'发布详情')+heading('版本 '+esc(release.version_name||release.version_code||''),esc(release.package_name||'')+' · '+formatDate(release.created_at))+notice()+renderReleaseDetails(release);
-}
-function renderAccounts() {
-  let html=heading('账号与凭据','在此接入与更新渠道凭据，CLI 与 Web 自动复用本机保存的账号。')+notice()+'<div class="notice">'+icon('shield')+' 凭据验证通过后安全保存在本机。账号资料和发布进度由两个入口共用。</div>';
-  if(!state.accounts.length)return html+empty('暂无渠道账号','先创建应用并选择渠道，再接入对应账号的凭据。',link('新建应用','#/app/new','primary'));
-  html+='<div class="panel"><div class="panel-header">本机渠道账号</div><div class="table-wrap"><table><thead><tr><th>渠道 / 账号</th><th>凭据</th><th>引用应用</th><th>操作</th></tr></thead><tbody>';
-  for(const account of state.accounts)html+='<tr><td><strong>'+esc(names[account.channel])+'</strong><div class="cell-note">'+esc(account.account)+'</div></td><td>'+badge(account.saved?'已保存':'待接入',account.saved?'success':'warn')+'</td><td>'+account.apps.map(app=>'<a href="#/app/'+encodeURIComponent(app)+'">'+esc(app)+'</a>').join('、')+'</td><td><div class="flex wrap">'+btn(account.saved?'更新凭据':'接入凭据','credential-update','small'+(account.saved?'':' primary'),'data-channel="'+esc(account.channel)+'" data-account="'+esc(account.account)+'"')+btn('清除凭据','forget','small danger','data-channel="'+esc(account.channel)+'" data-account="'+esc(account.account)+'"')+'</div></td></tr>';
-  return html+'</tbody></table></div></div><p class="footnote">也可通过终端更新：<code>android-release account update &lt;渠道&gt; &lt;账号备注&gt;</code></p>';
-}
+function renderAccounts(){let html=heading('发布账号','同一个发布账号可用于多个应用，密钥验证后保存在本机。')+notice();if(!state.accounts.length)return html+empty('还没有发布账号','先添加应用并选择商店，接入时会一起保存发布账号。',link('添加应用','#/setup/new','primary'));return html+'<div class="panel"><div class="panel-header">已关联的发布账号</div><div class="table-wrap"><table><thead><tr><th>渠道 / 发布账号</th><th>密钥</th><th>使用它的应用</th><th>操作</th></tr></thead><tbody>'+state.accounts.map(row=>'<tr><td><strong>'+esc(names[row.channel])+'</strong><div class="cell-note">'+esc(row.client_id||row.account)+'</div></td><td>'+badge(row.saved?'已保存':'待接入',row.saved?'success':'warn')+'</td><td>'+(row.apps.length?row.apps.map((id,index)=>'<a href="#/app/'+encodeURIComponent(id)+'">'+esc(row.app_names?.[index]||appName(id))+'</a>').join('、'):'<span class="small-muted">暂未关联应用</span>')+'</td><td><div class="flex wrap">'+(row.apps.length?btn(row.saved?'更新密钥':'接入密钥','credential-update','small'+(row.saved?'':' primary'),'data-channel="'+row.channel+'" data-account="'+esc(row.account)+'"'):'')+btn('清除本机密钥','forget','small danger','data-channel="'+row.channel+'" data-account="'+esc(row.account)+'"')+'</div></td></tr>').join('')+'</tbody></table></div></div>';}
+function renderDoctor(){const result=state.diagnostic;let html=heading('本机检查','安装与检查由工具管理，无需配置 Android 构建环境。',btn('重新检查本机','doctor')+btn('安装或修复检查组件','doctor-repair',result?.ready?'':'primary'))+notice()+taskBanner();if(!result)return html;html+='<div class="notice '+(result.ready?'success':'warn')+'">'+(result.ready?'本机检查通过，可以检查安装包。':'有组件需要处理，已保存的应用和发布材料不受影响。')+'</div><div class="panel"><div class="panel-header">检查结果</div><ul class="check-list">'+(result.checks||[]).map(check=>'<li>'+badge(check.status==='ok'?'可用':'需要处理',check.status==='ok'?'success':'warn')+'<div class="check-content"><div class="check-title">'+esc(check.name||check.id)+'</div><div class="check-detail">'+esc(check.message||'')+'</div></div></li>').join('')+'</ul></div><details class="technical-details"><summary>版本与运行信息</summary><dl class="summary-grid"><div class="summary-item"><dt>版本</dt><dd>'+esc(result.version||'—')+'</dd></div><div class="summary-item"><dt>Node.js</dt><dd>'+esc(result.runtime||'—')+'</dd></div><div class="summary-item"><dt>系统 / 架构</dt><dd>'+esc(result.platform||'')+' / '+esc(result.arch||'')+'</dd></div></dl></details>';return html;}
+function renderProtocols(){return heading('商店支持情况','提交、审核和上架分别记录，部分渠道需要到后台查看结果。')+notice()+'<div class="panel"><div class="table-wrap"><table><thead><tr><th>商店</th><th>审核结果</th><th>上架结果</th><th>说明上限</th></tr></thead><tbody>'+state.protocols.map(row=>'<tr><td><strong>'+esc(row.name||names[row.channel])+'</strong></td><td>'+esc(row.review_query?'可自动查询':'到后台查看')+'</td><td>'+esc(row.availability_query?'可自动查询':'到后台查看')+'</td><td>'+esc(row.release_notes_max)+' 字符</td></tr>').join('')+'</tbody></table></div></div><p class="footnote">实际账号与公开上架仍需逐渠道验证，支持情况来自当前接口实现与合成测试。</p>';}
+
 function credentialField(spec) {
-  const key=spec.key,label=esc(spec.label),required=spec.optional?'（可选）':'<span class="required">*</span>';
+  const key=spec.key,label=esc(spec.label),required=spec.optional?'（可选）':'<span class="required" aria-hidden="true">*</span>';
   if(!spec.material)return '<div class="field"><label for="credential-'+key+'">'+label+required+'</label><div class="credential-input"><input type="password" id="credential-'+key+'" data-credential-secret="'+key+'" autocomplete="new-password" spellcheck="false" autocapitalize="off" autocorrect="off" maxlength="65536"><button type="button" class="btn small" data-action="credential-reveal" data-control="credential-'+key+'" aria-pressed="false">显示内容</button></div></div>';
-  const content='<div class="field credential-material" data-credential-material="'+key+'"><label for="credential-mode-'+key+'">'+label+required+'</label><select id="credential-mode-'+key+'" data-credential-mode="'+key+'"><option value="file">使用本机私有文件路径</option><option value="text">直接粘贴 '+esc(spec.material)+' 内容</option></select><div class="credential-method" data-credential-file-panel="'+key+'"><label class="field-label" for="credential-file-'+key+'">本机绝对路径</label><input type="text" id="credential-file-'+key+'" data-credential-file="'+key+'" autocomplete="off" spellcheck="false" autocorrect="off" maxlength="4096" placeholder="/绝对路径/'+(spec.material==='PEM'?'public-key.pem':'account.json')+'"><span class="hint">文件须属于当前用户，权限为 0600。服务端会先检查权限，再读取材料。</span></div><div class="credential-method" data-credential-text-panel="'+key+'" hidden><div class="credential-label-row"><label class="field-label" for="credential-text-'+key+'">'+esc(spec.material)+' 内容</label><button type="button" class="btn small" data-action="credential-reveal" data-control="credential-text-'+key+'" aria-pressed="false">显示内容</button></div><textarea id="credential-text-'+key+'" class="credential-secret masked" data-credential-secret="'+key+'" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" maxlength="65536" rows="5" placeholder="粘贴完整 '+esc(spec.material)+' 内容，保留原有换行。"></textarea><span class="hint">内容默认遮蔽，可临时显示核对。提交或关闭后会清空输入。</span></div></div>';
+  const content='<div class="field credential-material" data-credential-material="'+key+'"><label for="credential-mode-'+key+'">'+label+required+'</label><select id="credential-mode-'+key+'" data-credential-mode="'+key+'"><option value="text">直接粘贴 '+esc(spec.material)+' 内容</option><option value="file">使用本机私有文件路径</option></select><div class="credential-method" data-credential-file-panel="'+key+'"><label class="field-label" for="credential-file-'+key+'">本机绝对路径</label><input type="text" id="credential-file-'+key+'" data-credential-file="'+key+'" autocomplete="off" spellcheck="false" autocorrect="off" maxlength="4096" placeholder="/绝对路径/'+(spec.material==='PEM'?'public-key.pem':'account.json')+'"><span class="hint">文件须属于当前用户，权限为 0600。服务端会先检查权限，再读取材料。</span></div><div class="credential-method" data-credential-text-panel="'+key+'" hidden><div class="credential-label-row"><label class="field-label" for="credential-text-'+key+'">'+esc(spec.material)+' 内容</label><button type="button" class="btn small" data-action="credential-reveal" data-control="credential-text-'+key+'" aria-pressed="false">显示内容</button></div><textarea id="credential-text-'+key+'" class="credential-secret masked" data-credential-secret="'+key+'" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" maxlength="65536" rows="5" placeholder="粘贴完整 '+esc(spec.material)+' 内容，保留原有换行。"></textarea><span class="hint">从商店下载的 API 材料中复制完整内容。内容默认遮蔽，提交或关闭后清空。</span></div></div>';
   return spec.optional?'<details class="credential-optional"><summary>'+label+'（可选）</summary>'+content+'</details>':content;
 }
 function syncCredentialModes(form) {
@@ -271,17 +210,19 @@ function closeModal() {
   $('#modal').replaceChildren();
   if(channel&&account)[...document.querySelectorAll('[data-action="credential-update"]')].find(button=>button.dataset.channel===channel&&button.dataset.account===account)?.focus();
 }
-function openCredentials(channel,account) {
+function openCredentials(channel,account,context=null) {
   closeModal();
   $('#toast').hidden=true;clearTimeout(toastTimer);
+  state.credentialContext=context;
   const row=state.accounts.find(item=>item.channel===channel&&item.account===account);
   if(!row||!credentialSpecs[channel])return;
-  $('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title" aria-describedby="credential-context"><div class="modal-heading"><h2 id="credential-title">'+esc(names[channel])+' · '+(row.saved?'更新凭据':'接入凭据')+'</h2><button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><div id="credential-context" class="credential-context"><div><span class="small-muted">渠道账号</span><strong>'+esc(account)+'</strong></div><div><span class="small-muted">关联应用</span><span>'+row.apps.map(esc).join('、')+'</span></div></div><p class="footnote">验证渠道访问权限后安全保存，后续发布会自动复用。应用配置、发布记录和查询结果共用同一账号。</p><form id="credentials-form" autocomplete="off" data-channel="'+esc(channel)+'" data-account="'+esc(account)+'"><div id="credential-error" class="notice error" role="alert" hidden></div>'+credentialSpecs[channel].map(credentialField).join('')+'<div id="credential-progress" class="progress-label" role="status" hidden><span class="spinner"></span>正在验证并保存凭据…</div><div class="form-actions"><button type="submit" class="btn primary" id="credential-save">验证并保存</button>'+btn('取消','close-modal')+'</div></form></div></section></div>';
-  const form=$('#credentials-form');
+  $('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog credential-dialog" role="dialog" aria-modal="true" aria-labelledby="credential-title" aria-describedby="credential-context"><div class="modal-heading"><h2 id="credential-title">'+esc(names[channel])+' · '+(row.saved?'更新密钥':'接入密钥')+'</h2><button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><div id="credential-context" class="credential-context"><div><span class="small-muted">发布账号</span><strong>'+esc(account)+'</strong></div><div><span class="small-muted">关联应用</span><span>'+(row.app_names||row.apps.map(appName)).map(esc).join('、')+'</span></div></div><p class="footnote">此处填写商店API访问资料，APK签名由打包过程完成。验证通过后保存在本机，后续发布自动复用。</p><form id="credentials-form" autocomplete="off" data-channel="'+esc(channel)+'" data-account="'+esc(account)+'"><div id="credential-error" class="notice error" role="alert" hidden></div>'+credentialSpecs[channel].map(credentialField).join('')+'<div id="credential-progress" class="progress-label" role="status" hidden><span class="spinner"></span>正在验证并保存凭据…</div><div class="form-actions"><button type="submit" class="btn primary" id="credential-save">验证并保存</button>'+btn('取消','close-modal')+'</div></form></div></section></div>';
+  const form=$('#credentials-form');syncCredentialModes(form);
   [...form.querySelectorAll('input,textarea,select')].find(control=>control.getClientRects().length)?.focus();
 }
 async function saveCredentials(form) {
   if(state.busy)return;
+  const context=state.credentialContext;
   let payload;
   let failed=false;
   let saved=false;
@@ -312,6 +253,8 @@ async function saveCredentials(form) {
     saved=true;
     closeModal();
     state.accounts=(await api('accounts.list')).accounts||[];
+    await refreshApps();
+    await afterCredentialSaved(context);
     toast('凭据已验证并安全保存。');
   }catch(error){
     failed=true;
@@ -327,206 +270,42 @@ async function saveCredentials(form) {
     if(navigationPending){navigationPending=false;await navigate();}
   }
 }
-function renderDoctor() {
-  const result=state.diagnostic;
-  let html=heading('环境诊断','检查发布所需的本机组件，直接安装或修复检查环境。',btn(icon('refresh')+' 重新检查','doctor')+btn(icon('upload')+' 安装 / 修复检查组件','doctor-repair',result?.ready?'':'primary'))+notice();
-  if(!result)return html;
-  html+='<div class="notice '+(result.ready?'success':'warn')+'">'+(result.ready?'发布组件检查通过。可以准备应用更新。':'部分组件需要处理。请按下方提示修复后重新检查。')+'</div>';
-  if(result.version||result.runtime||result.platform||result.arch)html+='<div class="panel"><div class="panel-header">版本与运行信息</div><div class="panel-body"><dl class="summary-grid"><div class="summary-item"><dt>CLI 版本</dt><dd>'+esc(result.version||'—')+'</dd></div><div class="summary-item"><dt>Node.js</dt><dd>'+esc(result.runtime||'—')+'</dd></div><div class="summary-item"><dt>运行平台</dt><dd>'+esc(result.platform||'—')+'</dd></div><div class="summary-item"><dt>CPU 架构</dt><dd>'+esc(result.arch||'—')+'</dd></div></dl></div></div>';
-  html+='<div class="panel"><div class="panel-header">组件检查</div><ul class="check-list">';
-  for(const check of result.checks||[])html+='<li>'+badge(({ok:'通过',missing:'缺失',failed:'失败',blocked:'待检查'})[check.status]||check.status,check.status==='ok'?'success':'warn')+'<div class="check-content"><div class="check-title">'+esc(check.name||check.id)+'</div><div class="check-detail">'+esc(check.message||'')+(check.path?'<p class="mono">'+esc(check.path)+'</p>':'')+(check.fixes||[]).map(fix=>'<p>'+esc(fix)+'</p>').join('')+'</div></div></li>';
-  return html+'</ul></div>';
-}
-function renderProtocols() {
-  let html=heading('渠道能力','了解当前能够自动确认的结果，以及需要后台核对的事项。')+notice()+'<div class="notice warn">六渠道以模拟接口验证为主。实际账号权限与公开上架结果，仍需使用获准的测试应用逐渠道验证。</div><div class="panel"><div class="table-wrap"><table><thead><tr><th>渠道</th><th>审核查询</th><th>上架确认</th><th>更新说明上限</th><th>关联条件</th></tr></thead><tbody>';
-  for(const row of state.protocols)html+='<tr><td><strong>'+esc(row.name||names[row.channel])+'</strong></td><td>'+badge(row.review_query?'支持':'后台核对',row.review_query?'success':'')+'</td><td>'+badge(row.availability_query?'支持':'后台核对',row.availability_query?'success':'')+'</td><td>'+esc(row.release_notes_max)+' 字符</td><td><span class="small-muted">'+esc(row.query_note||'')+'</span></td></tr>';
-  return html+'</tbody></table></div></div><p class="footnote">受理、审核与上架分别确认。无法关联本次版本的信息保留为未确认，响应丢失的写入继续阻止冲突提交。</p>';
-}
-function newWizard(app) { return {appId:app.project_id,step:1,channels:app.channels.map(row=>row.channel),files:{},uploaded:{},notes:'',release:null,plan:null,errors:{}}; }
-async function navigate() {
-  closeModal();
-  if(state.busy){navigationPending=true;return;}
-  $('#toast').hidden=true;clearTimeout(toastTimer);
-  state.busy=true;state.progress='正在加载…';state.notice=null;render();
-  try{
-    state.apps=(await api('apps.list')).apps||[];
-    const parts=(location.hash.replace(/^#\/?/,'')||'apps').split('/').map(decodeURIComponent);
-    const section=parts[0];
-    if(section==='app'&&parts[1]==='new'){state.view='appForm';state.app=null;state.appDraft=null;}
-    else if(section==='app'&&parts[1]){
-      state.app=selectedApp(parts[1]);if(!state.app)throw new Error('找不到此应用，请返回应用列表。');
-      if(parts[2]==='settings'){state.view='appForm';state.appDraft=null;}
-      else{state.view='app';state.releases=(await api('releases.list',{app_id:state.app.project_id})).releases||[];}
-    }else if(section==='publish'&&parts[1]){
-      const app=selectedApp(parts[1]);if(!app)throw new Error('请先配置应用。');
-      state.view='publish';if(!state.wizard||state.wizard.appId!==app.project_id){state.wizard=newWizard(app);const previous=(await api('releases.list',{app_id:app.project_id})).releases||[];state.wizard.previous=previous.find(release=>!release.all_accepted);}
-    }else if(section==='release'&&parts[1]){
-      state.view='release';const result=await api('releases.get',{release_id:parts[1],refresh:true});state.release={...result.release,errors:result.errors||{}};
-    }else if(section==='accounts'){state.view='accounts';state.accounts=(await api('accounts.list')).accounts||[];}
-    else if(section==='doctor'){state.view='doctor';state.diagnostic=await api('doctor');}
-    else if(section==='protocols'){state.view='protocols';const result=await api('protocols');state.protocols=result.channels||[];}
-    else{state.view='apps';state.wizard=null;}
-  }catch(error){state.notice={type:'error',text:error.message};}
-  finally{state.busy=false;state.progress='';render();}
-}
-async function prepareRelease() {
-  const wizard=state.wizard;
-  if(!wizard.channels.length)throw new Error('请至少选择一个渠道。');
-  const missing=wizard.channels.filter(channel=>!wizard.files[channel]);
-  if(missing.length)throw new Error('请为以下渠道选择 APK：'+missing.map(channel=>names[channel]).join('、')+'。');
-  const length=[...wizard.notes].length,max=wizard.channels.includes('vivo')?200:500;
-  if([...wizard.notes.trim()].length<5||length>max)throw new Error('更新说明须至少 5 个字符，当前选定渠道最多 '+max+' 个字符。');
-  const apks={};
-  for(const channel of wizard.channels){
-    const file=wizard.files[channel];
-    state.progress='正在读取 '+names[channel]+' APK…';render();
-    if(wizard.uploaded[channel]?.file!==file)wizard.uploaded[channel]={file,path:await upload(file)};
-    apks[channel]=wizard.uploaded[channel].path;
-  }
-  state.progress='正在校验并冻结发布材料…';render();
-  const result=await api('releases.prepare',{app_id:wizard.appId,apks,release_notes:wizard.notes,channels:wizard.channels});
-  wizard.release=result.release;wizard.relatedRelease=result.related_release||null;
-  if(result.duplicate)toast('已找到相同材料的发布记录，继续使用已有进度。');
-  if(wizard.release.all_accepted){wizard.step=4;return;}
-  wizard.step=2;wizard.plan=null;
-  await preflightRelease();
-}
-async function preflightRelease() {
-  const wizard=state.wizard;
-  if(!wizard.channels.length)throw new Error('请至少选择一个尚未完成的渠道。');
-  state.progress='正在检查渠道账号和商店现状…';render();
-  const result=await api('releases.preflight',{release_id:wizard.release.batch_id,channels:wizard.channels});
-  wizard.release=result.release;wizard.errors=result.errors||{};wizard.plan=null;
-}
-function activeRelease() { return state.view==='publish'?state.wizard?.release:state.release; }
-async function continueRelease(existing) {
-  const release=existing||activeRelease(),app=selectedApp(release.project_id);
-  if(!app)throw new Error('请先配置此应用。');
-  const pending=release.targets.filter(row=>row.execution_phase!=='submitted').map(row=>row.channel);
-  if(!pending.length){toast('本次发布的全部渠道已经受理。');return;}
-  state.wizard={...newWizard(app),step:2,channels:release.targets.map(row=>row.channel),release};
-  state.view='publish';history.replaceState(null,'','#/publish/'+encodeURIComponent(app.project_id));
-  await preflightRelease();
-}
-function openManual(channel) {
-  closeModal();
-  const release=activeRelease();
-  $('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-title"><div class="modal-heading"><h2 id="manual-title">记录 '+esc(names[channel])+' 人工核对</h2><button type="button" class="modal-close" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><p class="small-muted">'+esc(release.package_name)+' · '+esc(release.version_name)+'（'+esc(release.version_code)+'）</p><div class="notice">请先在商店后台核对上述版本。此记录会标示为人工核对，未决请求仍须取得可验证证据后处理。</div><form id="manual-form" data-channel="'+channel+'"><div class="form-grid"><div class="field"><label for="manual-review">审核结果</label><select id="manual-review" name="review_state"><option value="unknown">尚未确认</option><option value="in_review">审核中</option><option value="approved">审核通过</option><option value="rejected">审核拒绝</option></select></div><div class="field"><label for="manual-live">上架结果</label><select id="manual-live" name="availability_state"><option value="unknown">尚未确认</option><option value="live">已上架</option><option value="not_live">未上架</option></select></div></div>'+field('核对时间','observed_at',localTime(),'','datetime-local',true)+field('结果来源','source','商店开发者后台','填写核对入口或本机证据说明。','text',true)+'<div class="field"><label for="manual-note">补充说明</label><textarea id="manual-note" name="note" maxlength="2000" placeholder="记录与本次版本关联的依据…" rows="3"></textarea></div><div class="form-actions"><button type="submit" class="btn primary">保存人工核对记录</button>'+btn('取消','close-modal')+'</div></form></div></section></div>';
-  $('#manual-review').focus();
-}
-async function saveApp(form) {
-  const data=new FormData(form),editing=Boolean(state.app);
-  const selection=data.getAll('channel');
-  if(!selection.length)throw new Error('请至少选择一个渠道。');
-  const app={schema_version:2,project_id:editing?state.app.project_id:String(data.get('project_id')||'').trim(),package_name:String(data.get('package_name')||'').trim(),channels:[]};
-  const validId=value=>/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);
-  if(!validId(app.project_id))throw new Error('应用名称须以字母或数字开头，只能包含字母、数字、点、横线和下划线，最多 128 个字符。');
-  if(!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(app.package_name))throw new Error('请输入有效包名，例如 com.example.app。');
-  for(const channel of selection){
-    const row={channel,account:String(data.get(channel+'_account')||'').trim(),app_id:['xiaomi','oppo','vivo'].includes(channel)?app.package_name:String(data.get(channel+'_app_id')||'').trim()};
-    if(!validId(row.account))throw new Error(names[channel]+'：请填写有效的账号备注。');
-    if(!validId(row.app_id))throw new Error(names[channel]+'：请填写有效的商店 App ID。');
-    const client=String(data.get(channel+'_client_id')||'').trim();if(client)row.client_id=client;
-    if(['honor','xiaomi','oppo','vivo','tencent'].includes(channel)&&!validId(client))throw new Error(names[channel]+'：请填写有效的 API 账号标识。');
-    if(channel==='xiaomi'){row.icon_path=String(data.get('xiaomi_icon_path')||'').trim();row.privacy_url=String(data.get('xiaomi_privacy_url')||'').trim();}
-    const previous=state.app?.channels.find(item=>item.channel===channel);if(previous?.language_id)row.language_id=previous.language_id;
-    app.channels.push(row);
-  }
-  state.appDraft=app;
-  await work('正在保存应用配置…',async()=>{
-    await api('apps.save',{app,replace:editing});
-    state.apps=(await api('apps.list')).apps||[];state.app=selectedApp(app.project_id);state.view='app';state.releases=(await api('releases.list',{app_id:app.project_id})).releases||[];
-    state.notice={type:'success',text:'应用配置已保存。接下来可在“账号与凭据”直接接入各渠道，再检查访问权限。'};history.replaceState(null,'','#/app/'+encodeURIComponent(app.project_id));toast('应用配置已保存。');
-  });
-}
-document.addEventListener('submit',event=>{
-  event.preventDefault();const form=event.target;
-  if(state.busy)return;
-  if(form.id==='credentials-form'){void saveCredentials(form);return;}
-  if(form.id==='app-form')void saveApp(form).catch(error=>{state.notice={type:'error',text:error.message};render();});
-  if(form.id==='manual-form'){
-    const values=new FormData(form),channel=form.dataset.channel;
-    const payload={release_id:activeRelease().batch_id,channel,review_state:values.get('review_state'),availability_state:values.get('availability_state'),observed_at:new Date(String(values.get('observed_at'))).toISOString(),source:String(values.get('source')||''),note:String(values.get('note')||'')};
-    $('#modal').innerHTML='';
-    void work('正在保存人工核对记录…',async()=>{const result=await api('releases.manual',payload);if(state.view==='publish')state.wizard.release=result.release;else state.release=result.release;toast('人工核对记录已保存。');});
-  }
-});
-document.addEventListener('input',event=>{
-  const target=event.target;
-  if(target.matches('[data-credential-secret],[data-credential-file]')){const error=target.closest('form').querySelector('#credential-error');if(error)error.hidden=true;}
-  if(target.id==='app-search')document.querySelectorAll('[data-app-search]').forEach(card=>card.hidden=!card.dataset.appSearch.includes(target.value.toLowerCase()));
-  if(target.id==='release-notes'&&state.wizard){state.wizard.notes=target.value;$('#notes-count').textContent=[...target.value].length+' / '+(state.wizard.channels.includes('vivo')?'200':'500')+' 字符';}
-});
-document.addEventListener('change',async event=>{
-  const target=event.target;
-  if(target.dataset.credentialMode){const form=target.closest('form'),key=target.dataset.credentialMode;for(const control of form.querySelectorAll('[data-credential-file="'+key+'"],[data-credential-secret="'+key+'"]'))control.value='';const secret=form.querySelector('[data-credential-secret="'+key+'"]');secret.classList.add('masked');const reveal=form.querySelector('[data-control="'+secret.id+'"]');reveal.textContent='显示内容';reveal.setAttribute('aria-pressed','false');form.querySelector('#credential-error').hidden=true;syncCredentialModes(form);return;}
-  if(target.name==='channel'){target.closest('.channel-config').querySelector('.channel-fields').hidden=!target.checked;return;}
-  if(target.dataset.selectChannel){const wizard=state.wizard,channel=target.dataset.selectChannel;wizard.channels=target.checked?[...wizard.channels,channel]:wizard.channels.filter(item=>item!==channel);render();return;}
-  if(target.dataset.reviewChannel){const wizard=state.wizard,channel=target.dataset.reviewChannel;wizard.channels=target.checked?[...wizard.channels,channel]:wizard.channels.filter(item=>item!==channel);wizard.plan=null;return;}
-  if(target.dataset.apk){const file=target.files[0];if(file){state.wizard.files[target.dataset.apk]=file;render();}return;}
-  if(target.id==='notes-file'){
-    const file=target.files[0];if(!file)return;
-    try{if(file.size>64*1024)throw new Error('更新说明文件超过 64 KiB。');state.wizard.notes=new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer());render();}
-    catch(error){toast(error.message||'请使用 UTF-8 文本文件。');}
-  }
-  if(target.id==='xiaomi-icon'){
-    const file=target.files[0];if(!file)return;
-    target.disabled=true;
-    try{const filePath=await upload(file,'app-icon');$('#xiaomi_icon_path').value=filePath;toast('图标已保存在本机。');}
-    catch(error){toast(error.message);}
-    finally{target.disabled=false;}
-  }
-});
-document.addEventListener('click',event=>{
-  const anchor=event.target.closest('a');
-  if(anchor&&state.busy){event.preventDefault();toast('当前操作正在执行，请稍候。');return;}
-  const button=event.target.closest('[data-action]');if(!button)return;
-  const action=button.dataset.action;
-  if(action==='close-modal'){closeModal();return;}
-  if(state.busy)return;
-  if(action==='credential-update'){openCredentials(button.dataset.channel,button.dataset.account);return;}
-  if(action==='credential-reveal'){const control=document.getElementById(button.dataset.control);if(!control)return;const visible=button.getAttribute('aria-pressed')!=='true';if(control.tagName==='INPUT')control.type=visible?'text':'password';else control.classList.toggle('masked',!visible);button.setAttribute('aria-pressed',String(visible));button.textContent=visible?'隐藏内容':'显示内容';return;}
-  if(action==='manual'){openManual(button.dataset.channel);return;}
-  if(action==='back-preflight'){state.wizard.step=2;state.wizard.plan=null;render();return;}
-  if(action==='forget'){
-    if(!confirm('清除 '+names[button.dataset.channel]+' 账号 '+button.dataset.account+' 的本机凭据？引用此账号的应用将需要重新接入。'))return;
-    void work('正在清除本机凭据…',async()=>{await api('accounts.forget',{channel:button.dataset.channel,account:button.dataset.account});state.accounts=(await api('accounts.list')).accounts||[];toast('本机凭据已清除。');});return;
-  }
-  if(action==='prepare'){void work('正在准备发布材料…',prepareRelease);return;}
-  if(action==='check-app'){void work('正在检查渠道访问权限…',async()=>{const result=await api('apps.check',{app_id:state.app.project_id});const errors=Object.entries(result.errors||{});state.notice=errors.length?{type:'warn',text:errors.map(([channel,error])=>names[channel]+'：'+error).join('；')}:{type:'success',text:'所有已配置渠道的访问检查通过。'};});return;}
-  if(action==='continue-record'){void work('正在读取已有发布记录…',async()=>{const result=await api('releases.get',{release_id:button.dataset.release,refresh:false});await continueRelease(result.release);});return;}
-  if(action==='preflight'){void work('正在检查渠道…',preflightRelease);return;}
-  if(action==='review'){
-    void work('正在生成提交摘要…',async()=>{
-      const wizard=state.wizard;if(!wizard.channels.length)throw new Error('请至少选择一个渠道。');
-      if(wizard.channels.some(channel=>wizard.errors[channel]||wizard.release.targets.find(row=>row.channel===channel)?.recovery_required))throw new Error('所选渠道仍有预检失败或待核对事项，请先处理或明确取消勾选。');
-      const result=await api('releases.review',{release_id:wizard.release.batch_id,channels:wizard.channels});wizard.release=result.release;wizard.plan=result.plan;wizard.step=3;
-    });return;
-  }
-  if(action==='submit'){
-    void work('正在上传 APK 并提交审核，请保持终端与本页面运行…',async()=>{
-      const wizard=state.wizard;if(!wizard.plan)throw new Error('请先核对提交内容。');
-      const result=await api('releases.submit',{release_id:wizard.release.batch_id,approval_plan:wizard.plan.approval_plan});wizard.release={...result.release,errors:result.errors||{}};wizard.step=4;wizard.plan=null;
-    });return;
-  }
-  if(action==='continue'){void work('正在加载未完成渠道…',continueRelease);return;}
-  if(action==='refresh'){
-    void work('正在查询各渠道最新结果…',async()=>{const result=await api('releases.get',{release_id:activeRelease().batch_id,refresh:true});const release={...result.release,errors:result.errors||{}};if(state.view==='publish')state.wizard.release=release;else state.release=release;});return;
-  }
-  if(action==='reconcile'){
-    void work('正在读取可核对的远端证据…',async()=>{const result=await api('releases.reconcile',{release_id:activeRelease().batch_id});const release={...result.release,errors:result.errors||{}};if(state.view==='publish')state.wizard.release=release;else state.release=release;});return;
-  }
-  if(action==='doctor'){void work('正在检查本机组件…',async()=>{state.diagnostic=await api('doctor');});return;}
-  if(action==='doctor-repair'){void work('正在安装并校验 APK 检查组件，请稍候…',async()=>{state.diagnostic=await api('doctor.repair');toast(state.diagnostic.ready?'检查组件已安装，环境检查通过。':'检查组件安装完成，请查看剩余诊断事项。');});return;}
-});
-document.addEventListener('keydown',event=>{
-  if(event.key==='Escape')closeModal();
-  if((event.key==='Enter'||event.key===' ')&&event.target.classList.contains('file-picker')){event.preventDefault();document.getElementById(event.target.htmlFor).click();}
-  const dialog=$('.modal-dialog');
-  if(event.key==='Tab'&&dialog){const controls=[...dialog.querySelectorAll('button,input,textarea,select,[tabindex]')].filter(control=>!control.disabled&&control.getClientRects().length);const first=controls[0],last=controls[controls.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}}
-});
-window.addEventListener('pagehide',closeModal);
-window.addEventListener('beforeunload',closeModal);
+
+function appDefault(){return{schema_version:2,project_id:'app-'+crypto.randomUUID().slice(0,8),display_name:'',package_name:'',channels:[]};}
+function rowDefault(channel,pkg){const saved=state.accounts.find(row=>row.channel===channel&&row.saved);return{channel,account:saved?.account||channel+'-main',app_id:['xiaomi','oppo','vivo'].includes(channel)?pkg:'',...(fieldLabels[channel]?{client_id:saved?.client_id||''}:{})};}
+function captureSetupForm(){const setup=state.setup,form=$('#setup-form');if(!setup||!form)return;for(const key of ['display_name','package_name','project_id']){const control=form.querySelector('[name="'+key+'"]');if(control)setup.value[key]=control.value.trim();}const row=setup.value.channels[setup.index];if(setup.step===3&&row){for(const key of ['app_id','account','client_id','icon_path','privacy_url']){const control=form.querySelector('[name="channel-'+key+'"]');if(control)row[key]=control.value.trim();}if(['xiaomi','oppo','vivo'].includes(row.channel))row.app_id=setup.value.package_name;}}
+function readyRow(row,pkg){const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);if(!id(row.account)||!id(['xiaomi','oppo','vivo'].includes(row.channel)?pkg:row.app_id))return false;if(fieldLabels[row.channel]&&!id(row.client_id))return false;if(row.channel==='xiaomi'){if(!row.icon_path?.startsWith('/'))return false;try{const url=new URL(row.privacy_url);if(url.protocol!=='https:'||url.search||url.hash||url.username||url.password)return false;}catch{return false;}}return true;}
+function validateBasics(){const value=state.setup.value;if(!value.display_name?.trim())throw new Error('请填写应用的真实名称，例如“阅读助手”。');if(new TextEncoder().encode(value.display_name).length>256)throw new Error('应用名称过长，请缩短后继续。');if(!/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(value.package_name))throw new Error('请填写现有应用的 Android 包名，例如 com.example.app。');if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.project_id))throw new Error('高级设置中的命令行短名格式无效，请使用字母、数字、点、横线或下划线。');}
+async function loadSetup(key,query){await refreshApps();state.accounts=(await api('accounts.list')).accounts||[];const app=key==='new'?null:selectedApp(key);const draftKey=key==='new'?'new-app':key;const saved=await api('drafts.get',{kind:'app',id:draftKey});const value=saved.draft||app&&structuredClone(app)||appDefault();value.display_name||=app?.display_name||app?.project_id||'';value.channels||=[];const step=query.has('channel')?3:!value.display_name||!value.package_name?1:value.channels.length?3:2;let index=Math.max(0,value.channels.findIndex(row=>row.channel===query.get('channel')));if(!query.has('channel')&&step===3)index=Math.max(0,value.channels.findIndex(row=>!overview(value.project_id).channels.some(item=>item.channel===row.channel&&item.saved&&item.connected)));state.setup={key:draftKey,value,step,index,stage:'editing',persistable:true,returnTo:query.get('return')==='publish'?'publish':''};state.app=app;state.view='setup';markSave(saved.draft?'已恢复本机保存的接入资料':'更改会自动保存到本机');}
+async function setupNext(){captureSetupForm();validateBasics();const setup=state.setup;if(setup.step===1)setup.step=2;else{if(!setup.value.channels.length)throw new Error('请选择这个应用已开通的商店。');setup.step=3;setup.index=0;}await saveSetup(true);render();}
+async function connectSetupChannel(){captureSetupForm();validateBasics();const setup=state.setup,row=setup.value.channels[setup.index];if(row.channel==='xiaomi'&&(!row.icon_path||!row.privacy_url))throw new Error('请填写小米审核所需的'+(!row.icon_path?'应用图标':'隐私政策网页')+'，资料会保留。');if(!readyRow(row,setup.value.package_name))throw new Error('请先填写'+names[row.channel]+'的应用编号、发布账号标识及审核所需资料。已填写内容会保留。');await saveSetup(true);const existing=selectedApp(setup.value.project_id);const merged=new Map((existing?.channels||[]).map(item=>[item.channel,item]));for(const item of setup.value.channels)if(readyRow(item,setup.value.package_name))merged.set(item.channel,{...item,app_id:['xiaomi','oppo','vivo'].includes(item.channel)?setup.value.package_name:item.app_id});await api('apps.save',{app:{schema_version:2,project_id:setup.value.project_id,display_name:setup.value.display_name,package_name:setup.value.package_name,channels:[...merged.values()]},replace:Boolean(existing)});await refreshApps();state.accounts=(await api('accounts.list')).accounts||[];state.app=selectedApp(setup.value.project_id);if(state.setup!==setup)return;const account=state.accounts.find(item=>item.channel===row.channel&&item.account===row.account);if(account?.saved)await startJob('apps.check',{app_id:setup.value.project_id,channels:[row.channel]},{kind:'setup',appId:setup.value.project_id,channel:row.channel});else openCredentials(row.channel,row.account,{kind:'setup',key:setup.key,appId:setup.value.project_id,channel:row.channel});}
+async function advanceSetup(channel){const setup=state.setup;if(!setup)return;const status=overview(setup.value.project_id).channels.find(row=>row.channel===channel);if(!status?.connected){state.notice={type:'warn',text:names[channel]+'还不能访问这个应用。资料已保存，请检查或更新发布账号。'};render();return;}const next=setup.value.channels.findIndex((row,index)=>index>setup.index&&!setupStatus(row.channel));if(next>=0){setup.index=next;setup.step=3;}else if(setup.value.channels.every(row=>setupStatus(row.channel))){setup.stage='complete';setup.persistable=false;await clearSavedDraft('app',setup.key);if(setup.key==='new-app')state.newAppDraft=null;}else{setup.stage='complete';}await saveSetupIfIncomplete();render();}
+async function saveSetupIfIncomplete(){if(state.setup?.stage!=='complete')await saveSetup(true);}
+async function afterCredentialSaved(context){if(context?.kind==='setup'&&state.setup?.key===context.key)await advanceSetup(context.channel);if(context?.kind==='repair'){if(context.releaseId)await refreshCachedRelease(context.releaseId);if(state.publish?.appId===context.appId){state.publish.plan=null;state.publish.phase=state.publish.mode==='retry'?'checking':'materials';state.publish.revision++;}state.notice={type:'success',text:names[context.channel]+'发布账号已验证。原安装包、说明和其它渠道结果保留，可以重新检查或重试此渠道。'};}}
+function newPublish(app,draft=null){return{appId:app.project_id,flowId:crypto.randomUUID(),persistable:true,mode:'new',channels:draft?.channels||app.channels.map(row=>row.channel),apks:draft?.apks||{},notes:draft?.release_notes||'',releaseId:draft?.release_id||null,release:null,phase:'materials',errors:{},checkError:'',plan:null,revision:0,uploading:{},restored:Boolean(draft),related:null};}
+function draftFromPublish(p){return{app_id:p.appId,channels:[...p.channels],apks:Object.fromEntries(p.channels.filter(channel=>p.apks[channel]).map(channel=>[channel,p.apks[channel]])),release_notes:p.notes,...(p.releaseId?{release_id:p.releaseId}:{})};}
+async function loadPublish(id,fresh=false){const app=selectedApp(id);if(!app)throw new Error('请先添加这个应用。');const response=await api('drafts.get',{kind:'release',id});state.app=app;state.publish=newPublish(app,fresh?null:response.draft);if(state.publish.releaseId){const release=await refreshCachedRelease(state.publish.releaseId);if(release.has_writes||submitting(release.batch_id)){state.publish.persistable=false;await clearSavedDraft('release',id);state.release=release;state.view='release';history.replaceState(null,'','#/release/'+encodeURIComponent(release.batch_id));return;}state.publish.release=release;}state.view='publish';if(fresh){await saveRelease(true);history.replaceState(null,'','#/publish/'+encodeURIComponent(id));}markSave(response.draft&&!fresh?'已恢复本机发布草稿':'更改会自动保存到本机');}
+function invalidatePublish(){const p=state.publish;if(!p)return;p.revision++;p.plan=null;p.checkError='';p.phase=p.mode==='retry'?'checking':'materials';}
+async function beginChecks(){const p=state.publish;if(!p.channels.length)throw new Error('请至少选择一个提交渠道。');const missing=p.channels.filter(channel=>!p.apks[channel]);if(missing.length)throw new Error('请为'+missing.map(channel=>names[channel]).join('、')+'选择对应的安装包，或明确取消本次提交。');if(Object.keys(p.uploading).length)throw new Error('安装包还在保存到本机，请保存完成后检查。');const max=p.channels.includes('vivo')?200:500;if([...p.notes.trim()].length<5||[...p.notes].length>max)throw new Error('更新说明至少5个字符，当前渠道最多'+max+'个字符。');await saveRelease(true);p.plan=null;p.errors={};p.checkError='';p.phase='checking';render();await startJob('releases.prepare',{app_id:p.appId,apks:Object.fromEntries(p.channels.map(channel=>[channel,p.apks[channel]])),release_notes:p.notes,channels:p.channels},{kind:'publish',appId:p.appId,flowId:p.flowId,revision:p.revision});}
+async function recheck(){const p=state.publish;p.plan=null;p.checkError='';if(!p.releaseId)return beginChecks();await startJob('releases.preflight',{release_id:p.releaseId,channels:p.channels},{kind:'publish',appId:p.appId,flowId:p.flowId,revision:p.revision});}
+async function requestReview(){const p=state.publish;if(!p.channels.length)throw new Error('请至少选择一个提交渠道。');const payload={release_id:p.releaseId,channels:p.channels,...(p.attemptOnly?{attempt_only:true}:{})};await startJob('releases.review',payload,{kind:'publish',appId:p.appId,flowId:p.flowId,revision:p.revision});}
+async function confirmSubmit(){const p=state.publish;if(!p?.plan||p.phase!=='confirm')return;const payload={release_id:p.releaseId,approval_plan:p.plan.approval_plan,...(p.attemptOnly?{attempt_only:true}:{})};p.phase='tracking';p.plan=null;render();let job;try{job=await startJob('releases.submit',payload,{kind:'submit',appId:p.appId});}catch(error){p.phase='checking';p.persistable=true;p.checkError='提交任务尚未启动，草稿已保留。重新检查后可再次确认。';throw error;}if(job&&p.mode!=='retry'){p.persistable=false;try{await clearSavedDraft('release',p.appId);}catch{state.notice={type:'warn',text:'提交任务已启动，原材料已随发布保留。旧草稿暂未清理，可在结果页继续查看。'};}state.appReleaseDraft=null;}}
+async function startNewRelease(id){const existing=(await api('drafts.get',{kind:'release',id})).draft;if(existing&&(Object.keys(existing.apks||{}).length||existing.release_notes)){closeModal();$('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-title"><div class="modal-heading"><h2 id="draft-title">这份应用已有发布草稿</h2><button class="modal-close" type="button" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><p>已保存'+Object.keys(existing.apks||{}).length+'个渠道安装包和更新说明。可以继续这份草稿，也可以明确新建一份空白草稿。</p><div class="form-actions">'+link('继续这份草稿','#/publish/'+encodeURIComponent(id),'primary')+btn('新建空白草稿','fresh-release','','data-app="'+id+'"')+'</div></div></section></div>';return;}location.hash='#/publish/'+encodeURIComponent(id)+'?new=1';}
+async function editRelease(id){const release=await refreshCachedRelease(id);if(release.has_writes||!release.can_edit||submitting(id)){state.release=release;state.view='release';history.replaceState(null,'','#/release/'+encodeURIComponent(id));state.notice={type:'warn',text:'这次发布已经开始提交，原材料会保留。要更换安装包或更新说明，请准备另一次发布。'};render();return;}const value={app_id:release.project_id,channels:release.targets.map(row=>row.channel),apks:Object.fromEntries(release.targets.map(row=>[row.channel,row.artifact.path])),release_notes:release.release_notes,release_id:id};await api('drafts.save',{kind:'release',id:release.project_id,value});location.hash='#/publish/'+encodeURIComponent(release.project_id);}
+async function retryChannel(id,channel){const release=await refreshCachedRelease(id),target=release.targets.find(row=>row.channel===channel);if(!target||target.recovery_required)throw new Error('请先检查'+names[channel]+'上次提交的结果，原记录仍保留。');if(!release.has_writes)return editRelease(id);state.release=release;state.app=selectedApp(release.project_id);state.publish={...newPublish(state.app),mode:'retry',channels:[channel],releaseId:id,release,notes:release.release_notes,apks:Object.fromEntries(release.targets.map(row=>[row.channel,row.artifact.path])),attemptOnly:true,phase:'checking'};state.view='publish';history.replaceState(null,'','#/retry/'+encodeURIComponent(id)+'/'+channel);await recheck();}
+async function fixAccount(appId,channel,releaseId){state.accounts=(await api('accounts.list')).accounts||[];const release=releaseId?await refreshCachedRelease(releaseId):null;const target=release?.targets.find(row=>row.channel===channel)||selectedApp(appId)?.channels.find(row=>row.channel===channel);if(!target)throw new Error('请先保存'+names[channel]+'的商店应用和发布账号资料。');const account=state.accounts.find(row=>row.channel===channel&&row.account===target.account);if(!account)throw new Error('原发布使用的账号尚未关联当前应用资料。原记录已保留，请在应用资料中核对这个账号。');openCredentials(channel,target.account,{kind:'repair',appId,releaseId,channel});}
+function openManual(id,channel){const release=state.release||state.publish?.release;if(!release||release.batch_id!==id)return void work('正在读取发布记录…',async()=>{state.release=await refreshCachedRelease(id);openManual(id,channel);});closeModal();const waiting=release.targets.find(row=>row.channel===channel)?.recovery_required;$('#modal').innerHTML='<div class="modal-overlay"><section class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="manual-title"><div class="modal-heading"><h2 id="manual-title">'+esc(names[channel])+' · 后台查看并记录</h2><button class="modal-close" type="button" data-action="close-modal" aria-label="关闭">×</button></div><div class="modal-content"><ol class="business-steps"><li>打开你平时使用的'+esc(names[channel])+'开发者后台。</li><li>选择应用 <strong>'+esc(release.package_name)+'</strong>。</li><li>找到版本 <strong>'+esc(release.version_name)+'（'+esc(release.version_code)+'）</strong>，查看审核状态和当前在架版本。</li></ol>'+(waiting?'<div class="notice warn">这里记录的是后台查看结果。原提交请求仍需要可验证的结果，工具会继续保留记录。</div>':'')+'<form id="manual-form" data-release="'+id+'" data-channel="'+channel+'"><div class="form-grid"><div class="field"><label for="manual-review">后台审核结果</label><select id="manual-review" name="review_state"><option value="unknown">还不能确认</option><option value="in_review">审核中</option><option value="approved">已通过</option><option value="rejected">未通过</option></select></div><div class="field"><label for="manual-live">后台上架结果</label><select id="manual-live" name="availability_state"><option value="unknown">还不能确认</option><option value="live">已上架</option><option value="not_live">未上架</option></select></div></div>'+field('查看时间','observed_at',localTime(),'','datetime-local',true)+field('查看位置或依据','source',names[channel]+'开发者后台','例如该版本的审核记录或在架版本信息。','text',true)+'<div class="field"><label for="manual-note">补充记录（可选）</label><textarea id="manual-note" name="note" maxlength="2000" rows="3"></textarea></div><div class="form-actions"><button type="submit" class="btn primary">保存本机查看记录</button>'+btn('取消','close-modal')+'</div></form></div></section></div>';const previous=effectiveManual(release,release.targets.find(row=>row.channel===channel));$('#manual-review').value=previous?.review_state||'unknown';$('#manual-live').value=previous?.availability_state||'unknown';$('#manual-review').focus();}
+async function navigate(){closeModal();flushDrafts();const generation=++routeGeneration;state.notice=null;const[route,search='']=(location.hash.replace(/^#\/?/,'')||'home').split('?');const parts=route.split('/').map(decodeURIComponent),query=new URLSearchParams(search);try{await refreshApps();if(generation!==routeGeneration)return;state.newAppDraft=(await api('drafts.get',{kind:'app',id:'new-app'})).draft;const section=parts[0];if(section==='setup'){await loadSetup(parts[1]||'new',query);}else if(section==='publish'){await loadPublish(parts[1],query.get('new')==='1');}else if(section==='retry'&&parts[1]&&parts[2]){await retryChannel(parts[1],parts[2]);}else if(section==='release'){state.release=await refreshCachedRelease(parts[1]);state.app=selectedApp(state.release.project_id);state.view='release';autoRefresh.set(parts[1],0);}else if(section==='accounts'){state.accounts=(await api('accounts.list')).accounts||[];state.view='accounts';state.app=null;}else if(section==='doctor'){state.diagnostic=await api('doctor');state.view='doctor';state.app=null;}else if(section==='protocols'){state.protocols=(await api('protocols')).channels||[];state.view='protocols';state.app=null;}else{const id=section==='app'?parts[1]:section==='home'&&state.apps.length===1?state.apps[0].project_id:null;if(id){state.app=selectedApp(id);if(!state.app)throw new Error('找不到这个应用，请从应用列表选择。');state.releases=(await api('releases.list',{app_id:id})).releases||[];state.appSetupDraft=(await api('drafts.get',{kind:'app',id})).draft;state.appReleaseDraft=(await api('drafts.get',{kind:'release',id})).draft;if(state.appReleaseDraft?.release_id&&state.releases.some(row=>row.batch_id===state.appReleaseDraft.release_id&&(row.has_writes||submitting(row.batch_id)))){await clearSavedDraft('release',id);state.appReleaseDraft=null;}state.view='app';if(section==='home')history.replaceState(null,'','#/app/'+encodeURIComponent(id));}else{state.app=null;state.view='apps';}}}catch(error){state.notice={type:'error',text:error.message||'页面暂时无法加载，本机资料仍保留。'};}finally{if(generation===routeGeneration)render();}}
+document.addEventListener('submit',event=>{event.preventDefault();const form=event.target;if(form.id==='credentials-form'){void saveCredentials(form);return;}if(form.id==='setup-form'){void work('正在保存应用资料…',()=>state.setup.step===3?connectSetupChannel():setupNext());return;}if(form.id==='manual-form'){const values=new FormData(form);const payload={release_id:form.dataset.release,channel:form.dataset.channel,review_state:values.get('review_state'),availability_state:values.get('availability_state'),observed_at:new Date(String(values.get('observed_at'))).toISOString(),source:String(values.get('source')||''),note:String(values.get('note')||'')};closeModal();void work('正在保存后台查看记录…',async()=>{const result=await api('releases.manual',payload);state.release=result.release;state.view='release';history.replaceState(null,'','#/release/'+encodeURIComponent(result.release.batch_id));toast('后台查看结果已保存在本机。');});}});
+document.addEventListener('input',event=>{const target=event.target;if(target.matches('[data-credential-secret],[data-credential-file]')){const error=target.closest('form').querySelector('#credential-error');if(error)error.hidden=true;return;}if(target.closest('#setup-form')){captureSetupForm();void saveSetup();return;}if(target.id==='release-notes'&&state.publish){state.publish.notes=target.value;invalidatePublish();const counter=$('#notes-count');if(counter)counter.textContent=[...target.value].length+' / '+(state.publish.channels.includes('vivo')?'200':'500')+' 字符';void saveRelease();}});
+async function handleChange(event,publish=state.publish,setupContext=state.setup){const target=event.target;try{if(target.dataset.credentialMode){const form=target.closest('form'),key=target.dataset.credentialMode;for(const control of form.querySelectorAll('[data-credential-file="'+key+'"],[data-credential-secret="'+key+'"]'))control.value='';const secret=form.querySelector('[data-credential-secret="'+key+'"]');secret.classList.add('masked');const reveal=form.querySelector('[data-control="'+secret.id+'"]');reveal.textContent='显示内容';reveal.setAttribute('aria-pressed','false');form.querySelector('#credential-error').hidden=true;syncCredentialModes(form);return;}if(target.dataset.setupSelect){captureSetupForm();const value=state.setup.value,channel=target.dataset.setupSelect;value.channels=target.checked?[...value.channels,rowDefault(channel,value.package_name)]:value.channels.filter(row=>row.channel!==channel);await saveSetup(true);render();return;}if(target.id==='account-choice'){captureSetupForm();const row=state.setup.value.channels[state.setup.index];if(target.value==='new'){row.account=row.channel+'-'+crypto.randomUUID().slice(0,8);if(fieldLabels[row.channel])row.client_id='';}else{const saved=state.accounts.find(item=>item.channel===row.channel&&item.account===target.value);row.account=saved.account;row.client_id=saved.client_id||state.apps.flatMap(app=>app.channels).find(item=>item.channel===row.channel&&item.account===saved.account)?.client_id||'';}await saveSetup(true);render();return;}if(target.id==='setup-icon'){const file=target.files[0];if(!file)return;const setup=setupContext;if(!setup||state.setup!==setup)return;const row=setup.value.channels[setup.index];state.progress='正在把应用图标保存到本机…';render();row.icon_path=await upload(file,'app-icon');if(state.setup===setup)await saveSetup(true);state.progress='';render();return;}if(target.dataset.publishChannel||target.dataset.checkChannel){const p=state.publish,channel=target.dataset.publishChannel||target.dataset.checkChannel;p.channels=target.checked?[...p.channels,channel]:p.channels.filter(item=>item!==channel);p.revision++;p.plan=null;if(target.dataset.publishChannel)p.phase='materials';await saveRelease(true);render();return;}if(target.dataset.apk){const file=target.files[0],p=publish,channel=target.dataset.apk;if(!file||!p||state.publish!==p)return;p.uploading[channel]=file.name;invalidatePublish();render();const saved=await upload(file);if(state.publish!==p||p.persistable===false)return;p.apks[channel]=saved;await persistDraft('release',p.appId,draftFromPublish(p),true);delete p.uploading[channel];render();return;}if(target.id==='notes-file'){const file=target.files[0];if(!file)return;if(file.size>65536)throw new Error('更新说明文件过大，请使用小于64KiB的UTF-8文本。');state.publish.notes=new TextDecoder('utf-8',{fatal:true}).decode(await file.arrayBuffer());invalidatePublish();await saveRelease(true);render();}}catch(error){if(target.dataset.apk&&publish)delete publish.uploading[target.dataset.apk];state.progress='';state.notice={type:'error',text:error.message||'文件尚未保存，原材料仍保留，请重试。'};render();}}
+document.addEventListener('change',event=>void handleChange(event));
+document.addEventListener('click',event=>{const anchor=event.target.closest('a');if(anchor&&anchor.getAttribute('href')?.startsWith('#/'))closeModal();const button=event.target.closest('[data-action]');if(!button)return;const action=button.dataset.action;if(action==='close-modal'){closeModal();return;}if(action==='credential-reveal'){const control=document.getElementById(button.dataset.control);if(!control)return;const visible=button.getAttribute('aria-pressed')!=='true';if(control.tagName==='INPUT')control.type=visible?'text':'password';else control.classList.toggle('masked',!visible);button.setAttribute('aria-pressed',String(visible));button.textContent=visible?'隐藏内容':'显示内容';return;}if(action==='credential-update'){if(!state.busy)openCredentials(button.dataset.channel,button.dataset.account);return;}const execute=async()=>{switch(action){case'restart-setup':if(!confirm('放弃这份未完成的接入草稿并添加另一个应用？已经保存的应用、渠道和本机密钥会保留。'))return;state.setup.persistable=false;await clearSavedDraft('app','new-app');state.newAppDraft=null;await loadSetup('new',new URLSearchParams());return render();case'setup-next':return setupNext();case'setup-back':captureSetupForm();state.setup.step=Math.max(1,state.setup.step-1);return render();case'setup-channel':captureSetupForm();await saveSetup(true);state.setup.index=Number(button.dataset.index);return render();case'setup-connect':return connectSetupChannel();case'setup-later':captureSetupForm();await saveSetup(true);if(state.setup.index+1<state.setup.value.channels.length)state.setup.index++;else state.setup.stage='complete';return render();case'setup-resume':state.setup.stage='editing';state.setup.step=3;state.setup.index=Math.max(0,state.setup.value.channels.findIndex(row=>!setupStatus(row.channel)));return render();case'remove-config-channel':{const app=selectedApp(button.dataset.app);if(!app||app.channels.length<=1)throw new Error('应用至少保留一个渠道，接入其它渠道后再移除。');if(!confirm('从'+appName(app)+'移除'+names[button.dataset.channel]+'渠道？只影响以后的发布，已有记录和本机密钥会保留。'))return;await api('apps.save',{app:{...app,channels:app.channels.filter(row=>row.channel!==button.dataset.channel)},replace:true});state.setup.value.channels=state.setup.value.channels.filter(row=>row.channel!==button.dataset.channel);state.setup.index=Math.max(0,Math.min(state.setup.index,state.setup.value.channels.length-1));await refreshApps();await saveSetup(true);toast('渠道已移除，已有发布记录仍保留。');return render();}case'new-release':return startNewRelease(button.dataset.app);case'fresh-release':closeModal();return location.hash='#/publish/'+encodeURIComponent(button.dataset.app)+'?new=1';case'edit-release':return editRelease(button.dataset.release);case'publish-check':return beginChecks();case'publish-recheck':return recheck();case'publish-edit':invalidatePublish();state.publish.phase='materials';return render();case'publish-submit':return confirmSubmit();case'retry-cancel':return location.hash='#/release/'+encodeURIComponent(state.publish.releaseId);case'retry-channel':return retryChannel(button.dataset.release,button.dataset.channel);case'check-result':return startJob('releases.reconcile',{release_id:button.dataset.release,channels:[button.dataset.channel]},{kind:'query',appId:button.dataset.app});case'refresh-release':autoRefresh.set(button.dataset.release,Date.now());return startJob('releases.get',{release_id:button.dataset.release,refresh:true},{kind:'query',appId:state.release?.project_id});case'fix-account':return fixAccount(button.dataset.app,button.dataset.channel,button.dataset.release);case'edit-channel':return location.hash='#/setup/'+encodeURIComponent(button.dataset.app)+'?channel='+button.dataset.channel+'&return=publish';case'check-channel':return startJob('apps.check',{app_id:button.dataset.app,channels:[button.dataset.channel]},{kind:'overview',appId:button.dataset.app});case'manual':return openManual(button.dataset.release,button.dataset.channel);case'doctor':state.diagnostic=await api('doctor');return render();case'doctor-repair':return startJob('doctor.repair',{},{});case'forget':{const row=state.accounts.find(item=>item.channel===button.dataset.channel&&item.account===button.dataset.account);if(!confirm('清除'+names[row.channel]+'这个账号的本机密钥？受影响应用：'+(row.app_names||row.apps.map(appName)).join('、')+'。发布结果和未完成的请求记录会保留。'))return;await api('accounts.forget',{channel:row.channel,account:row.account});state.accounts=(await api('accounts.list')).accounts||[];await refreshApps();toast('本机密钥已清除，相关应用需要重新接入。');return render();}}};void execute().catch(error=>{state.notice={type:'error',text:error.message||'操作未完成，已有资料仍保留。'};render();});});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeModal();if((event.key==='Enter'||event.key===' ')&&event.target.classList.contains('file-picker')){event.preventDefault();document.getElementById(event.target.htmlFor).click();}const dialog=$('.modal-dialog');if(event.key==='Tab'&&dialog){const controls=[...dialog.querySelectorAll('button,input,textarea,select,[tabindex]')].filter(control=>!control.disabled&&control.getClientRects().length);const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}});
+window.addEventListener('pagehide',()=>{closeModal();flushDrafts();});
+window.addEventListener('beforeunload',()=>{closeModal();flushDrafts();});
 window.addEventListener('hashchange',()=>void navigate());
-void navigate();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void pollJobs();});
+async function bootstrap(){try{const [apps,accounts,jobs,draft]=await Promise.all([api('apps.list'),api('accounts.list'),api('jobs.list'),api('drafts.get',{kind:'app',id:'new-app'})]);state.apps=apps.apps||[];state.overviews=apps.overviews||[];state.accounts=accounts.accounts||[];state.jobs=jobs.jobs||[];state.newAppDraft=draft.draft;for(const job of state.jobs)if(!running(job))handledJobs.add(job.id);await navigate();setInterval(()=>void pollJobs(),1200);void pollJobs();}catch(error){state.notice={type:'error',text:error.message||'本机服务暂时不可用，请重新打开页面。'};render();}}
+void bootstrap();
 `;
