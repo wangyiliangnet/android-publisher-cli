@@ -47,6 +47,13 @@ test('intent survives process restart and blocks conflicting writes', () => {
     assert.throws(() => store.savePreflight('batch-two', preflight()), /unresolved write/);
     store.finishOperation(operation, 'unknown');
     assert.equal(store.summary('batch-one').targets[0].recovery_required, true);
+    const conflict = store.summary('batch-two');
+    assert.equal(conflict.recovery_required, true);
+    assert.equal(conflict.targets[0].recovery[0].operation_id, operation.id);
+    assert.equal(conflict.targets[0].recovery[0].step, 'push');
+    assert.equal(conflict.targets[0].recovery[0].batch_id, 'batch-one');
+    assert.equal(conflict.targets[0].recovery[0].next_action, 'android-release batch reconcile --batch batch-one --channels xiaomi');
+    assert.deepEqual(conflict.targets[0].query_support, { review: false, availability: false });
     store.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

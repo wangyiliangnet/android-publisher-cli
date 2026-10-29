@@ -1,8 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { type Approval, type Availability, type Batch, type Channel, digest, type Effect, type Phase, type Preflight, type Review } from './model.js';
+import { type Approval, type Availability, type Batch, type Channel, digest, type Effect, type FrozenTarget, type Phase, type Preflight, type Review } from './model.js';
 import { dataRoot, privateDir } from './private-file.js';
+import { channelCapabilities } from './channels/capabilities.js';
+
+export const tokenScope = (channel: Channel, account: string, clientId: string): string => digest([channel, account, clientId, 'token']);
+
+export interface RecoveryIssue {
+  kind: 'account_token' | 'business_write';
+  effect: Effect;
+  recorded_at: string;
+  message: string;
+  next_action: string;
+  batch_id?: string;
+  operation_id?: string;
+  step?: string;
+}
 
 export interface TargetRow {
   batch_id: string;
@@ -241,9 +255,32 @@ export class Store {
         .run(token, expiresAt, new Date().toISOString(), scope);
     });
   }
-  unknownToken(scope: string): void {
-    this.tx(() => this.db.prepare("UPDATE token_leases SET effect='unknown',token='',updated_at=? WHERE scope=? AND effect='intent'")
-      .run(new Date().toISOString(), scope));
+  failToken(scope: string, effect: 'confirmed_rejected' | 'confirmed_not_applied' | 'unknown'): void {
+    this.tx(() => this.db.prepare("UPDATE token_leases SET effect=?,token='',expires_at='',updated_at=? WHERE scope=? AND effect='intent'")
+      .run(effect, new Date().toISOString(), scope));
+  }
+
+  accountToken(target: FrozenTarget): { effect: Effect; updated_at: string } | undefined {
+    if (!['honor', 'oppo'].includes(target.channel)) return undefined;
+    return row(this.db, 'SELECT effect,updated_at FROM token_leases WHERE scope=?',
+      tokenScope(target.channel, target.account, target.channel === 'oppo' ? target.account : target.client_id ?? ''));
+  }
+
+  recovery(id: string, channel: Channel): RecoveryIssue[] {
+    const target = this.target(id, channel);
+    const frozen = this.loadBatch(id).targets.find(item => item.channel === channel)!;
+    const token = this.accountToken(frozen);
+    const issues: RecoveryIssue[] = [];
+    if (token && ['intent', 'unknown'].includes(token.effect)) issues.push({ kind: 'account_token', effect: token.effect,
+      recorded_at: token.updated_at, message: '账号令牌申请结果未确定，已阻止再次申请；当前无法自动核对。',
+      next_action: '在渠道后台核对 API 账号，并联系维护者检查令牌记录。保留本机状态和账号备注。' });
+    const pending = rows<OperationRow>(this.db,
+      "SELECT * FROM operations WHERE scope=? AND effect IN ('intent','unknown') ORDER BY started_at,attempt", target.scope);
+    for (const op of pending) issues.push({ kind: 'business_write', effect: op.effect,
+      batch_id: op.batch_id, operation_id: op.id, step: op.step, recorded_at: op.started_at,
+      message: '发布请求结果未确定，先核对原批次。证据不足时须在渠道后台核对，并联系维护者。',
+      next_action: `android-release batch reconcile --batch ${op.batch_id} --channels ${channel}` });
+    return issues;
   }
 
   reservePacing(scope: string, intervalMs: number): number {
@@ -303,10 +340,16 @@ export class Store {
       const context = last && (last.association === 'unconfirmed' || target.phase !== 'submitted')
         ? { association: 'unconfirmed', source: last.source, observed_at: last.observed_at, ...last.context }
         : undefined;
+      const frozen = batch.targets.find(item => item.channel === target.channel)!;
+      const recovery = this.recovery(id, target.channel);
+      const token = this.accountToken(frozen);
+      const capability = channelCapabilities[target.channel];
       return { channel: target.channel, execution_phase: target.phase, review_state: target.review,
         availability_state: target.availability, query_status: target.query_status,
         last_success_at: target.last_success_at, last_error: target.last_error,
-        recovery_required: this.operations(id, target.channel).some(op => ['intent', 'unknown'].includes(op.effect)),
+        recovery_required: recovery.length > 0, recovery,
+        ...(token ? { account_token_status: token.effect } : {}),
+        query_support: { review: capability.review_query, availability: capability.availability_query },
         ...(context ? { channel_context: context } : {}) };
     });
     const accepted = targets.filter(t => t.execution_phase === 'submitted').length;
@@ -315,7 +358,7 @@ export class Store {
     return { schema_version: 2, batch_id: id, batch_digest: batch.digest, total_targets: targets.length,
       accepted_targets: accepted, approved_targets: approved, live_targets: live,
       all_accepted: accepted === targets.length, all_approved: approved === targets.length,
-      all_live: live === targets.length, targets };
+      all_live: live === targets.length, recovery_required: targets.some(target => target.recovery_required), targets };
   }
 
   verifyApproval(approval: Approval): void {

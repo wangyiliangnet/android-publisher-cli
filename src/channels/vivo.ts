@@ -2,6 +2,7 @@ import { type Preflight, digest } from '../model.js';
 import { md5File } from '../private-file.js';
 import { type Observation } from '../state.js';
 import { BaseAdapter, type StepReceipt } from './types.js';
+import { validateReleaseNotes } from './capabilities.js';
 import { check, decimal, hmacSign, object, required, str, unknown } from './http.js';
 
 const metadataFields = ['onlineType', 'updateDesc', 'detailDesc', 'icon', 'screenshot', 'mainTitle', 'subTitle',
@@ -50,11 +51,12 @@ export class VivoAdapter extends BaseAdapter {
   }
 
   async preflight(): Promise<Preflight> {
+    validateReleaseNotes(this.batch.release_notes, [this.channel]);
     const details = await this.details();
     if (BigInt(details.version) >= BigInt(this.batch.version_code)) throw new Error('vivo target version must exceed the existing version');
     if (!['1', '2', '3'].includes(details.metadata.compatibleDevice ?? '') ||
       !(details.metadata.ecopyright || details.metadata.copyrightList)) throw new Error('vivo baseline is missing required device or copyright fields');
-    if ([...this.batch.release_notes].length > 200 || [...(details.metadata.detailDesc ?? '')].length < 50 ||
+    if ([...(details.metadata.detailDesc ?? '')].length < 50 ||
       [...(details.metadata.detailDesc ?? '')].length > 1000) throw new Error('vivo release metadata does not meet publishing requirements');
     return this.preflightRecord({ remote_version_code: details.version, metadata: details.metadata });
   }
@@ -84,8 +86,8 @@ export class VivoAdapter extends BaseAdapter {
       const fields: Record<string, string> = {};
       for (const key of metadataFields) if (!attachmentFields.has(key) && key !== 'status' && key !== 'saleStatus' && baseline[key] !== undefined) fields[key] = baseline[key];
       const notes = this.batch.release_notes;
-      if ([...notes].length < 5 || [...notes].length > 200 ||
-        [...(fields.detailDesc ?? '')].length < 50 || [...(fields.detailDesc ?? '')].length > 1000 ||
+      validateReleaseNotes(notes, [this.channel]);
+      if ([...(fields.detailDesc ?? '')].length < 50 || [...(fields.detailDesc ?? '')].length > 1000 ||
         !['1', '2', '3'].includes(fields.compatibleDevice ?? '')) throw new Error('vivo metadata does not meet publishing requirements');
       fields.updateDesc = notes;
       fields.packageName = this.batch.package_name;
