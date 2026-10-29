@@ -15,6 +15,15 @@ export const credentialFields: Record<Channel, readonly string[]> = {
   tencent: ['api_secret'],
 };
 
+const credentialLabels: Record<Channel, Record<string, string>> = {
+  huawei: { service_account_json: '华为服务账号 JSON 文件的绝对路径' },
+  honor: { client_secret: '荣耀 client_secret（与配置中的 client_id 配对的密钥）' },
+  xiaomi: { api_secret: '小米 API 密钥（api_secret）', public_key_pem: '小米 API 公钥或证书 PEM 文件的绝对路径' },
+  oppo: { client_secret: 'OPPO client_secret（与配置中的 client_id 配对的密钥）' },
+  vivo: { access_secret: 'vivo access_secret（与配置中的 access_key 配对的密钥）' },
+  tencent: { api_secret: '应用宝主开发者账号的 API 密钥（api_secret）' },
+};
+
 function askHidden(label: string): Promise<string> {
   return new Promise((resolve, reject) => {
     let fd: number;
@@ -54,13 +63,13 @@ export class PromptCredentials implements CredentialSource {
     const credentials: CredentialSet = {};
     for (const field of credentialFields[channel]) {
       const fileInput = field === 'service_account_json' || field === 'public_key_pem';
-      const typed = await askHidden(`${channel} ${field}${fileInput ? ' 文件绝对路径' : ''}`);
+      const typed = await askHidden(credentialLabels[channel][field]!);
       const value = fileInput ? regularFile(typed, 64 * 1024, true).toString('utf8').trimEnd() : typed;
       if (!value || Buffer.byteLength(value) > 64 * 1024 || /[\u0000\u007f]/u.test(value)) throw new Error(`${channel}: credential input is invalid`);
       credentials[field] = value;
     }
     if (channel === 'xiaomi') {
-      const file = await askHidden('xiaomi test_account_json 文件绝对路径（可留空）');
+      const file = await askHidden('小米审核登录用的测试账号 JSON 文件绝对路径（test_account_json，不需要时回车跳过）');
       if (file) {
         const value = regularFile(file, 64 * 1024, true).toString('utf8').trimEnd();
         if (!value) throw new Error('xiaomi: test account input is empty');

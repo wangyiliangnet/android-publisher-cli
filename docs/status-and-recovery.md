@@ -1,62 +1,60 @@
-# 状态查询与恢复
+# 查询结果与处理中断
 
-`batch submit` 返回后，先检查进程退出码和 `accepted_targets`，再查询每个渠道。渠道受理、审核通过和公开上架是不同状态。
+提交完成后，你需要分别确认商店是否受理、是否审核通过、是否已经上架。命令中断时，也先查看同一批次的进度，再决定是否继续。
 
-## 查询状态
+本页继续使用发布批次 `demo-1-0-0`。批次的创建过程见[发布应用更新](release-workflow.md)。
+
+## 查询最新结果
 
 ```sh
 android-release batch status --batch demo-1-0-0 --refresh
 ```
 
-`--refresh` 会提示输入凭据，读取渠道数据并更新本机状态。去掉 `--refresh` 时，命令只读缓存；缓存不代表刚取得的远端结果。
+`--refresh` 会提示输入渠道密钥，向商店查询并保存结果。去掉 `--refresh` 则只查看上次保存的记录，可在离线时使用。需要只查部分渠道时，刷新命令可加 `--channels huawei,honor`。
 
-| 字段 | 含义 |
+先看各渠道的 `targets`，再看批次汇总。下面这些字段各自回答一个问题：
+
+| 你要知道什么 | 字段与取值 |
 | --- | --- |
-| `execution_phase` | `submitted` 表示渠道已受理提交 |
-| `review_state` | 与目标版本关联的审核状态 |
-| `availability_state` | 与目标版本关联的公开上架状态 |
-| `query_status`、`last_success_at` | 查询健康状态和最近一次成功时间 |
-| `recovery_required` | 存在未决业务写入，不能直接重发 |
+| 提交走到哪一步 | `execution_phase`：`prepared` 已保存批次，`preflighted` 已通过预检，`submitted` 商店已受理，`unknown` 执行结果待核对 |
+| 审核是否通过 | `review_state`：`in_review` 审核中，`approved` 通过，`rejected` 拒绝，`unknown` 尚无法确认 |
+| 这个版本是否已上架 | `availability_state`：`live` 已上架，`not_live` 未上架，`unknown` 尚无法确认 |
+| 最近一次查询是否成功 | `query_status`：`never` 尚未查询，`ok` 查询成功，`failed` 查询失败；`last_success_at` 是最近成功时间 |
+| 是否有操作不能直接重试 | `recovery_required: true` 表示有已发出但结果未确定的请求 |
 
-查询失败时，CLI 保留已有的 `last_success_at`，并把 `query_status` 记为 `failed`。不要把查询失败解释为审核失败，也不要把审核通过解释为公开上架。
+`accepted_targets`、`approved_targets` 和 `live_targets` 分别统计受理、审核通过和上架的渠道数。`total_targets` 是整个批次的渠道数，只提交部分渠道时，汇总不会自动缩小到所选范围。
 
-## 渠道结果的关联
+查询失败时先看 `last_error`，检查网络、账号密钥和权限后再次刷新。已有审核与上架记录会保留，`last_success_at` 也保留原值，因此要同时看查询时间和 `query_status`。查询失败不代表审核被拒绝。
 
-CLI 只用能关联目标版本的证据更新审核和上架状态：
+## 为什么有些状态一直无法确认
 
-| 渠道 | 关联依据 | 结果限制 |
-| --- | --- | --- |
-| 华为 | 本地有受理回执，API 返回目标版本 | 只读取该版本的审核和在架字段 |
-| 荣耀 | 审核查询返回本次提交回执中的 `releaseId` | 只确认匹配标识的结果 |
-| OPPO | 目标版本、已上传 APK 的 MD5 和版本标识一致 | 审核与上架分别记录 |
-| vivo | 详情接口返回目标版本 | 审核与上架分别记录 |
-| 小米 | 包查询只给出账号下的版本 | 不能据此确认本次审核或公开上架 |
-| 应用宝 | 审核接口缺少本次版本标识 | 不能据此确认本次审核或公开上架 |
+CLI 必须确认商店返回的结果属于本次版本，才会更新审核或上架状态。商店返回的其他版本或整个账号的信息，会放在 `channel_context` 中，标为 `unconfirmed`，只供参考。
 
-小米和应用宝的未关联信息写入 `channel_context`，标为 `unconfirmed`。这些信息不会增加 `approved_targets` 或 `live_targets`。
+| 渠道 | 当前可确认的范围 |
+| --- | --- |
+| 华为 | 已有本次受理记录且版本匹配时，分别读取审核和在架版本 |
+| 荣耀 | 审核结果匹配本次 `releaseId` 时，确认审核状态；当前查询不确认上架 |
+| OPPO | 版本、已上传 APK 的 MD5 和版本标识匹配后，分别确认审核与上架 |
+| vivo | 返回的版本匹配时，分别确认审核与上架 |
+| 小米 | 仅有账号下的包查询，不能确认本次审核或公开上架 |
+| 应用宝 | 审核查询缺少本次版本标识，不能确认本次审核或公开上架 |
 
-## 报告与历史
+遇到这些限制，请在对应商店后台核对目标版本。`unknown` 表示工具没有足够信息，不表示失败。后台核对结果也不会自动改变 CLI 的本机记录。
 
-```sh
-android-release batch report --batch demo-1-0-0 \
-  --file "/absolute/path/report.md"
-android-release history
-```
+## 报错或中断后继续
 
-报告的父目录须已存在。报告只含本地摘要和已关联状态，不含渠道密钥、令牌或签名 URL。它仍可能暴露包名、版本和发布进度，分享前请检查。
-
-## 中断后核对
-
-网络错误或终端退出后，先读取缓存，再运行只读核对：
+先查看已有记录，再查询是否能确定中断请求的结果：
 
 ```sh
 android-release batch status --batch demo-1-0-0
 android-release batch reconcile --batch demo-1-0-0
 ```
 
-响应丢失时，请求可能已经生效。当前协议证据不足以自动确认这类写入；`reconcile` 会保留阻塞。请在渠道后台核实具体操作，再交给维护者处理。保留 SQLite 记录和原批准文件，不能用新批次绕过同一渠道、账号和应用的未决写入。
+`reconcile` 是中断核对命令，需要渠道密钥，只读取远端数据。请求发出后丢失响应，商店可能已经执行。当前六个渠道尚不能凭现有接口自动确定这类请求的结果，因此核对后仍可能保留阻塞。
 
-如果没有未决写入，且只是后续步骤未完成，可用原批准文件继续：
+出现 `recovery_required: true` 时，请在渠道后台核对具体版本与操作，并交给维护者检查。保留原提交计划和本机记录。不要重新建批次、更换账号备注或删除状态库来绕过阻塞，这可能造成重复提交。
+
+如果没有未确定结果的请求，只是后续步骤尚未完成，可用原提交计划继续：
 
 ```sh
 android-release batch resume --batch demo-1-0-0 \
@@ -64,10 +62,32 @@ android-release batch resume --batch demo-1-0-0 \
   --approve-plan APPROVAL_PLAN_FROM_REVIEW
 ```
 
-`resume` 跳过已确认步骤，并复核批准内容；遇到未决步骤不会重发。退出码 `3` 表示部分目标失败或结果未决，`2` 表示输入或配置错误。提交错误后先检查 `recovery_required`。
+`resume` 会复核原计划与 APK，跳过已确认完成的步骤；遇到结果未确定的步骤会停止。将示例校验值替换为原计划的 `approval_plan`。
 
-## 本机状态与备份
+若提示 `remote baseline changed after review`，说明核对计划后商店资料发生了变化。在没有未确定请求的情况下，重新预检、生成新计划文件并核对，再决定是否继续。
 
-项目、冻结产物、SQLite 日志、令牌和上传授权保存在 `~/Library/Application Support/AndroidPublisherCLI/v2/`。CLI 没有状态备份或恢复命令。
+退出码 `0` 表示命令完成；`2` 表示参数、文件或环境等错误；`3` 表示部分渠道失败或结果未确定。渠道错误详情见输出中的 `errors`。`reconcile` 的退出码为 `0` 也可能仍需处理 `recovery_required`；退出码不表示审核通过或已经上架。
 
-需要备份时，先停止所有 CLI 进程，再私下复制整个 `v2` 目录及 SQLite 附属文件。恢复后先核对远端结果，再决定是否继续发布。备份含敏感状态，不能进入仓库或构建产物。
+## 导出记录
+
+```sh
+android-release batch report --batch demo-1-0-0 \
+  --file "/absolute/path/report.md"
+android-release history
+```
+
+`report` 把当前保存的批次状态导出为 Markdown，不主动刷新商店结果。文件的父目录须已存在，文件名须尚未使用。`history` 列出本机保存的全部发布批次，供你找回批次名。
+
+报告不含密钥、令牌或带签名的上传地址，但含包名、版本和发布进度，分享前请检查。
+
+## 本机数据与备份
+
+配置、APK 和图标副本、发布记录、短期令牌与上传授权保存在：
+
+```text
+~/Library/Application Support/AndroidPublisherCLI/v2/
+```
+
+其中 `projects/` 保存应用配置，`artifacts/` 保存发布文件副本，其余发布状态由 SQLite 数据库管理。账号密钥文件仍由你保管，CLI 不使用 macOS 钥匙串。
+
+CLI 没有备份或恢复命令。需要备份时，先停止所有 CLI 进程，再复制整个 `v2` 目录，包括数据库附属文件。备份含敏感资料，请私下保存。恢复后，先核对商店结果，再决定是否继续发布；不要只复制单个数据库文件。

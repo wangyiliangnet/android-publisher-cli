@@ -1,43 +1,48 @@
 # 贡献指南
 
-修改 CLI、测试或文档前，先按改动范围读取对应资料。操作者的安装和发布步骤从 [README](README.md) 进入。
+本页面向修改代码和文档的贡献者。使用工具发布 Android 应用，请从 [README](README.md) 开始。提交改动前，你需要验证命令行为、发布记录兼容性，以及中断后是否可能重复提交。
 
-## 开发与测试
+## 准备开发环境
 
-安装 [`.node-version`](.node-version) 指定的 Node.js。仓库用 `package-lock.json` 固定 npm 依赖：
+安装 [`.node-version`](.node-version) 指定的 Node.js，使用 `package-lock.json` 中锁定的依赖版本：
 
 ```sh
 npm ci --ignore-scripts
 npm run check
 ```
 
-`npm run check` 依次检查 TypeScript 类型、构建 CLI 并运行 Node.js 测试。真实 APK 测试需要 Android SDK Build Tools 和 JDK；本机完整验收时设置：
+`npm run check` 依次执行 TypeScript 类型检查、构建和 Node.js 测试。测试使用临时文件与模拟商店响应，不访问真实商店或提交应用。
+
+需要验证真实 APK 的检查与签名时，按[安装说明](docs/getting-started.md#安装-android-工具)准备 SDK Build-Tools、Command-line Tools、SDK Platform 和 JDK，然后运行：
 
 ```sh
 PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 ```
 
-工具缺失时，完整验收应失败。普通本机测试会明确显示跳过的真实 APK 用例。合成渠道测试使用本地响应，不访问商店或提交应用。从源码试用 CLI 时，运行 `npm run build` 后可执行 `npm link`。
+完整验收要求真实 APK 用例通过；工具缺失会失败。普通本机检查在工具缺失时会明确跳过该用例。测试中的 APK 和签名证书均临时生成，不使用真实应用材料。
 
-## 按改动检查
+从源码试用 CLI，先运行 `npm run build`，再执行 `node build/cli.js --help`。需要在终端直接使用命令名时，可运行 `npm link`。
 
-| 改动 | 先读 | 验收重点 |
+## 按改动范围查资料
+
+| 改动范围 | 先读 | 验证重点 |
 | --- | --- | --- |
-| 批次、执行、状态或恢复 | [架构说明](docs/architecture.md) | 请求前保存意图；响应丢失后重启不能重复发送 |
-| 渠道请求或观测 | [渠道协议](docs/channels/protocol-evidence.md)、[状态查询与恢复](docs/status-and-recovery.md) | 核对官方字段，覆盖成功、错误和无法关联的结果 |
-| npm 打包与发布 | [npm 包验收](docs/npm-package.md)、[CLI 版本发布](docs/npm-release.md) | 安装实际 tarball，核对文件清单、命令和版本 |
-| 文档 | [README](README.md) 的阅读入口 | 核对命令、条件、链接与验证程度 |
+| 安装、诊断、配置向导 | [安装](docs/getting-started.md)、[应用配置](docs/configuration.md) | 缺失工具有修复方法，输入说明明确，重配保留已有账号备注 |
+| 发布批次、执行、状态或恢复 | [架构说明](docs/architecture.md)、[查询与恢复](docs/status-and-recovery.md) | 请求前保存意图，响应丢失后重启不能重复发送 |
+| 渠道请求与查询 | [渠道接口](docs/channels/protocol-evidence.md) | 核对官方字段，覆盖成功、错误与无法关联本次版本的结果 |
+| npm 打包与发布 | [安装包验收](docs/npm-package.md)、[CLI 发版](docs/npm-release.md) | 安装实际压缩包，检查文件清单、命令入口和版本 |
+| 使用文档 | [README](README.md) 的阅读入口 | 先说明任务和作用，再给步骤、成功判断和失败处理 |
 
-渠道协议由本仓库独立实现。复用第三方代码前，先确认许可证。测试、示例和截图使用 `com.example.app`、`example.invalid` 等合成内容。真实账号、APK、私钥、Cookie、签名 URL 和原始响应不能进入 Git、issue、构建产物或普通日志。
+每个用户概念使用同一名称。用户文档称 `project` 为“应用配置”，`batch` 为“发布批次”，`approval` 为“提交计划”，并在首次出现时对应到命令字段。维护文档保留必要的状态、表和类型名称。
 
-## 分支与 PR
+## 分支、检查与 PR
 
-代码 agent 使用 `codex/topic` 分支。提交前，在本仓库配置 GitHub noreply 邮箱，并确认 GitHub 网页设置隐藏邮箱地址。按实际改动运行检查，向 `main` 创建 PR。说明行为变化、检查结果、恢复影响和仍待验证的渠道条件。
+代码 agent 使用 `codex/topic` 分支，并在本仓库配置 GitHub noreply 提交邮箱。不要直接推送、强制推送或删除 `main`。
 
-合并前，以待合并提交上的必需 CI `check` 为准。解决实质性审查意见后，使用 squash 合并。仓库规则禁止直接推送、强制推送或删除 `main`。PR 合并不授权 Android 应用提审。
+按改动运行检查，向 `main` 创建 PR。说明解决的问题、变更后的行为、实际完成的验证，以及兼容性和仍待验证的渠道条件。合并前，以待合并提交的必需 CI `check` 为准；处理实质性审查意见后 squash 合并。
 
-[check.yml](.github/workflows/check.yml) 运行公开源码扫描、TypeScript 检查和测试。测试覆盖合成协议、真实 APK 签名、子进程崩溃恢复及 npm 安装。CI 只使用临时身份与合成材料。
+[check.yml](.github/workflows/check.yml) 会检查公开源码、工作流、TypeScript 和测试，并安装实际 npm 包验证入口。CI 只使用临时身份与合成材料。
 
-CLI 版本通过 [Prepare npm release](.github/workflows/prepare-npm-release.yml) 创建 PR。维护者合并后发布对应 GitHub Release，触发 [Publish npm package](.github/workflows/publish-npm.yml)。操作顺序见 [CLI 版本发布](docs/npm-release.md)。
+渠道协议由本仓库独立实现，复用第三方代码前须核对许可证。真实账号、APK、私钥、Cookie、带签名的上传地址和原始响应不能进入 Git、issue 或构建产物。示例使用 `com.example.app`、`example.invalid` 等虚构资料。
 
-写操作步骤时，先列准备材料，再给命令。命令后说明成功的判断依据和失败时的处理。分别描述执行、审核、上架与查询健康状态。
+发布本工具的新版本，按 [CLI 发版流程](docs/npm-release.md)创建版本 PR 和 GitHub Release。代码测试、PR、打包或 CLI 发版均不构成 Android 应用提审授权。

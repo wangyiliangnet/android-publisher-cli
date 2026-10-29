@@ -6,8 +6,10 @@ import { type Artifact, validHash, validPackage, validVersion } from './model.js
 import { freezeFile, hashFile } from './private-file.js';
 
 function latest(directory: string, file: string): string {
-  if (!fs.existsSync(directory)) return '';
-  const versions = fs.readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory())
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(directory, { withFileTypes: true }); }
+  catch { return ''; }
+  const versions = entries.filter(entry => entry.isDirectory())
     .map(entry => entry.name).sort((a, b) => {
       const aa = a.match(/\d+/g)?.map(Number) ?? []; const bb = b.match(/\d+/g)?.map(Number) ?? [];
       for (let i = 0; i < Math.max(aa.length, bb.length); i++) if ((aa[i] ?? 0) !== (bb[i] ?? 0)) return (bb[i] ?? 0) - (aa[i] ?? 0);

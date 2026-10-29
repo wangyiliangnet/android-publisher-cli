@@ -4,10 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline/promises';
 import { AndroidTools } from './artifact.js';
+import { diagnose, doctorText } from './doctor.js';
+import { configureProject } from './setup.js';
 import { PromptCredentials } from './credentials.js';
-import { prepare, previewBatch, preflight, publicError, reconcile, report, review, saveProject, submit, refresh } from './engine.js';
-import { CHANNELS, type Channel, type Project, type ProjectChannel, isChannel, validateBatchInput, validateProject, validAbsolute, validId } from './model.js';
-import { readJSON, writePrivate } from './private-file.js';
+import { loadProject, projectPath, prepare, previewBatch, preflight, publicError, reconcile, report, review, saveProject, submit, refresh } from './engine.js';
+import { CHANNELS, type Channel, type Project, isChannel, validateBatchInput, validAbsolute } from './model.js';
+import { dataRoot, readJSON, writePrivate } from './private-file.js';
 import { Store } from './state.js';
 
 type Flags = Record<string, string | boolean>;
@@ -47,8 +49,8 @@ function toolFlags(f: Flags): AndroidTools {
 }
 
 function help(): void {
-  process.stdout.write(`Android Publisher CLI (TypeScript + npm)\n\n` +
-    `android-release doctor [--sdk-root DIR] [--java-home DIR]\n` +
+  process.stdout.write(`Android 发布工具：配置应用 → 准备发布 → 检查渠道 → 核对计划 → 提交审核 → 查询结果\n\n` +
+    `android-release doctor [--sdk-root DIR] [--java-home DIR] [--json]  检查本机工具并给出修复方法\n` +
     `android-release inspect --apk /absolute/file.apk\n` +
     `android-release setup --project ID [--replace]\n` +
     `android-release prepare --file /absolute/batch.json\n` +
@@ -58,44 +60,21 @@ function help(): void {
     `android-release batch status --batch ID [--refresh]\n` +
     `android-release batch reconcile --batch ID\n` +
     `android-release batch report --batch ID --file /absolute/report.md\n` +
-    `android-release history | protocols | version [--json]\n\n` +
-    `Credentials are requested in the terminal. Multiline JSON and PEM inputs use private files.\n`);
+    `android-release history\n` +
+    `android-release protocols\n` +
+    `android-release version [--json]\n\n` +
+    `setup 保存应用配置；prepare 保存本次 APK 和更新说明，生成发布批次。\n` +
+    `batch review 生成供你核对的提交计划；submit 会上传 APK 并提审。\n` +
+    `密钥通过终端输入。JSON 和 PEM 材料按提示输入私有文件的绝对路径。\n`);
 }
 
-async function setupWizard(projectId: string): Promise<Project> {
-  if (!validId(projectId)) throw new Error('project ID is invalid');
+async function setupWizard(projectId: string, previous?: Project): Promise<Project> {
   const io = readline.createInterface({ input: process.stdin, output: process.stderr });
-  const ask = async (label: string, fallback = ''): Promise<string> => {
-    const typed = (await io.question(`${label}${fallback ? ` [${fallback}]` : ''}：`)).trim();
-    if (typed.toLowerCase() === 'cancel') throw new Error('setup canceled');
-    return typed || fallback;
-  };
   try {
-    const selection = channelsFlag(await ask('选择渠道，逗号分隔', CHANNELS.join(',')))!;
-    const rows: ProjectChannel[] = [];
-    for (const channel of selection) {
-      process.stderr.write(`${channel}：只输入公开账号和应用标识。凭据在执行命令时另行输入。\n`);
-      const account = await ask(channel === 'oppo' ? 'OPPO client_id（也作为本机账号名）' : '本机账号名', channel === 'oppo' ? '' : `${channel}-main`);
-      const appId = await ask('渠道应用 ID；小米、OPPO、vivo 填包名');
-      const row: ProjectChannel = { channel, account, app_id: appId };
-      const clientLabels: Partial<Record<Channel, string>> = { honor: 'Honor client_id', xiaomi: '小米 userName',
-        vivo: 'vivo access_key', tencent: '应用宝用户 uid' };
-      if (clientLabels[channel]) row.client_id = await ask(clientLabels[channel]!);
-      if (channel === 'huawei' || channel === 'honor') {
-        const language = await ask('中文语言 ID，可留空自动匹配');
-        if (language) row.language_id = language;
-      }
-      if (channel === 'xiaomi') {
-        row.icon_path = await ask('小米图标绝对路径');
-        row.privacy_url = await ask('小米公开 HTTPS 隐私政策 URL');
-      }
-      rows.push(row);
-    }
-    const project: Project = { schema_version: 2, project_id: projectId, channels: rows };
-    validateProject(project);
-    process.stderr.write(`项目摘要：${JSON.stringify(project)}\n`);
-    if ((await ask('确认保存，输入 yes')) !== 'yes') throw new Error('setup canceled');
-    return project;
+    return await configureProject(projectId, {
+      ask: (label, fallback) => io.question(`${label}${fallback ? ` [${fallback}]` : ''}：`),
+      write: message => { process.stderr.write(message); },
+    }, previous);
   } finally { io.close(); }
 }
 
@@ -111,9 +90,10 @@ async function run(args: string[]): Promise<number> {
     return 0;
   }
   if (command === 'doctor') {
-    const f = flags(args.slice(1), ['sdk-root', 'java-home']);
-    const diagnostic = toolFlags(f).diagnostic();
-    output({ schema_version: 2, ...diagnostic }); return diagnostic.ready ? 0 : 2;
+    const f = flags(args.slice(1), ['sdk-root', 'java-home'], ['json']);
+    const diagnostic = diagnose(toolFlags(f));
+    if (f.json) output(diagnostic); else process.stdout.write(doctorText(diagnostic));
+    return diagnostic.ready ? 0 : 2;
   }
   if (command === 'inspect') {
     const f = flags(args.slice(1), ['apk', 'sdk-root', 'java-home']);
@@ -127,7 +107,10 @@ async function run(args: string[]): Promise<number> {
   }
   if (command === 'setup') {
     const f = flags(args.slice(1), ['project'], ['replace']);
-    const project = await setupWizard(requiredFlag(f, 'project'));
+    const id = requiredFlag(f, 'project');
+    const exists = fs.existsSync(projectPath(dataRoot(), id));
+    if (exists && !f.replace) throw new Error('应用配置已存在。如需修改，请用 android-release setup --project ' + id + ' --replace');
+    const project = await setupWizard(id, exists ? loadProject(id) : undefined);
     saveProject(project, undefined, Boolean(f.replace));
     output({ schema_version: 2, project_id: project.project_id,
       channels: project.channels.map(row => row.channel), saved: true });
