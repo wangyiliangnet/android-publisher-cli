@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import tty from 'node:tty';
-import { type Channel } from './model.js';
+import { type Channel, isChannel, parseStrictJSON, validAbsolute } from './model.js';
 import { regularFile } from './private-file.js';
 
 export type CredentialSet = Record<string, string>;
@@ -14,6 +14,66 @@ export const credentialFields: Record<Channel, readonly string[]> = {
   vivo: ['access_secret'],
   tencent: ['api_secret'],
 };
+
+const credentialIssues = {
+  input: '凭据输入格式无效，请按所选渠道填写。',
+  fields: '凭据字段缺失、重复或不属于该渠道，请检查输入方式。',
+  file: '无法读取私有材料。请使用属于当前用户、权限为 0600 的本机绝对文件路径，或直接粘贴材料内容。',
+  format: '凭据材料格式无效，请检查密钥及 JSON/PEM 内容。',
+  account: '账号尚未关联应用，请先配置应用和渠道账号资料。',
+} as const;
+export class CredentialInputError extends Error {
+  readonly code: keyof typeof credentialIssues;
+  constructor(code: keyof typeof credentialIssues) {
+    const safe = Object.hasOwn(credentialIssues, code) ? code : 'input';
+    super(credentialIssues[safe]); this.code = safe;
+  }
+}
+
+/** Browser text stays in memory; paths use exactly the CLI's private-file checks. */
+export function resolveCredentialInput(channel: Channel, raw: unknown = {}, files: unknown = {}): CredentialSet {
+  const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  if (!isChannel(channel) || !object(raw) || !object(files)) throw new CredentialInputError('input');
+  const allowed = [...credentialFields[channel], ...(channel === 'xiaomi' ? ['test_account_json'] : [])];
+  const material = ['service_account_json', 'public_key_pem', 'test_account_json'];
+  const credentials: CredentialSet = {};
+  try {
+    for (const [field, value] of Object.entries(raw)) {
+      if (!allowed.includes(field) || typeof value !== 'string' || Object.hasOwn(files, field)) throw new CredentialInputError('fields');
+      credentials[field] = value;
+    }
+    for (const [field, file] of Object.entries(files)) {
+      if (!allowed.includes(field) || !material.includes(field)) throw new CredentialInputError('fields');
+      if (!validAbsolute(file)) throw new CredentialInputError('file');
+      try {
+        const bytes = regularFile(file, 65536, true);
+        try { credentials[field] = new TextDecoder('utf-8', { fatal: true }).decode(bytes).trimEnd(); }
+        finally { bytes.fill(0); }
+      }
+      catch { throw new CredentialInputError('file'); }
+    }
+    try { return validateCredentials(channel, credentials); }
+    catch { throw new CredentialInputError('format'); }
+  } catch (error) {
+    for (const field of Object.keys(credentials)) delete credentials[field];
+    throw error;
+  }
+}
+
+export function validateCredentials(channel: Channel, value: unknown): CredentialSet {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid credential material');
+  const fields = credentialFields[channel];
+  const values = value as Record<string, unknown>;
+  if (!fields || Object.keys(values).some(key => !fields.includes(key) && !(channel === 'xiaomi' && key === 'test_account_json')) ||
+    fields.some(key => !values[key])) throw new Error('missing channel credential fields');
+  for (const entry of Object.values(values)) if (typeof entry !== 'string' || !entry ||
+    Buffer.byteLength(entry) > 65536 || /[\u0000\u007f]/.test(entry)) throw new Error('invalid credential material');
+  for (const field of ['service_account_json', 'test_account_json']) if (values[field]) {
+    try { parseStrictJSON(values[field] as string); }
+    catch { throw new Error(`${channel}：JSON 凭据材料格式无效，请检查私有文件`); }
+  }
+  return values as CredentialSet;
+}
 
 const credentialLabels: Record<Channel, Record<string, string>> = {
   huawei: { service_account_json: '华为服务账号 JSON 文件的绝对路径' },
@@ -76,6 +136,7 @@ export class PromptCredentials implements CredentialSource {
         credentials.test_account_json = value;
       }
     }
+    validateCredentials(channel, credentials);
     this.cache.set(channel, credentials);
     return credentials;
   }

@@ -31,16 +31,11 @@ function fixture(t, version = 'latest') {
   return { sdk, java, analyzer, run };
 }
 
-test('doctor explains how to install the missing apkanalyzer and exits 2', t => {
-  const { sdk, java, analyzer, run } = fixture(t);
+test('developer tool diagnostic explains the missing apkanalyzer', t => {
+  const { sdk, java, analyzer } = fixture(t);
   fs.unlinkSync(analyzer);
-  const result = run();
-  assert.equal(result.status, 2);
-  assert.match(result.stdout, /\[缺失\].*apkanalyzer/);
-  assert.match(result.stdout, /SDK Tools.*Android SDK Command-line Tools \(latest\)/);
-  assert.match(result.stdout, /Android SDK Location/);
-  assert.doesNotMatch(result.stdout, /\[缺失\].*apksigner/);
-  const json = JSON.parse(run('--json').stdout);
+  const json = diagnose(new AndroidTools(sdk, java));
+  assert.match(doctorText(json), /\[缺失\].*apkanalyzer/);
   assert.equal(json.ready, false);
   assert.equal(json.sdk_root, sdk);
   assert.equal(json.java_home, java);
@@ -48,16 +43,27 @@ test('doctor explains how to install the missing apkanalyzer and exits 2', t => 
   assert.equal(json.checks.find(check => check.id === 'apkanalyzer').status, 'missing');
 });
 
-test('doctor starts tools in a versioned SDK path and supports JSON for scripts', t => {
-  const { run } = fixture(t, '22.0');
-  const result = run('--json');
-  assert.equal(result.status, 0, result.stderr);
-  const json = JSON.parse(result.stdout);
+test('developer diagnostic starts tools in a versioned SDK path', t => {
+  const { sdk, java } = fixture(t, '22.0');
+  const json = diagnose(new AndroidTools(sdk, java));
   assert.equal(json.ready, true);
   assert.equal(json.schema_version, 2);
   assert.ok(json.checks.every(check => check.status === 'ok'));
   assert.match(json.apkanalyzer, /cmdline-tools\/22\.0\/bin\/apkanalyzer$/);
-  assert.match(run().stdout, /环境检查通过/);
+  assert.match(doctorText(json), /环境检查通过/);
+});
+
+test('user doctor is offline, checks managed components and never requests an SDK', t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-doctor-managed-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, [cli, 'doctor', '--json'], { encoding: 'utf8',
+    env: { ...process.env, HOME: root, ANDROID_SDK_ROOT: '', ANDROID_HOME: '', JAVA_HOME: '' } });
+  assert.equal(result.status, 1);
+  const json = JSON.parse(result.stdout);
+  assert.equal(json.managed, true);
+  assert.equal(json.ready, false);
+  assert.ok(json.checks.some(row => row.id === 'apk_checker' && row.status === 'missing'));
+  assert.ok(!fs.existsSync(path.join(root, 'Library')));
 });
 
 test('a Java launch failure blocks Java tools even when every file exists', t => {

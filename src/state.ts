@@ -56,6 +56,19 @@ export interface Observation {
   context?: Record<string, string>;
 }
 
+export interface ManualObservation {
+  channel: Channel;
+  review_state: Review;
+  availability_state: Availability;
+  observed_at: string;
+  source: string;
+  note: string;
+  recorded_at: string;
+  batch_digest: string;
+  version_code: string;
+  artifact_sha256: string;
+}
+
 function rows<T>(db: DatabaseSync, sql: string, ...params: (string | number)[]): T[] {
   return db.prepare(sql).all(...params) as T[];
 }
@@ -119,9 +132,57 @@ export class Store {
       PRAGMA user_version=2;
       COMMIT;
     `);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS manual_observations (
+      id INTEGER PRIMARY KEY, batch_id TEXT NOT NULL, channel TEXT NOT NULL, document TEXT NOT NULL,
+      FOREIGN KEY(batch_id, channel) REFERENCES targets(batch_id, channel)
+    )`);
   }
 
   close(): void { this.db.close(); }
+
+  recordManual(id: string, input: Pick<ManualObservation, 'channel' | 'review_state' | 'availability_state' | 'observed_at' | 'source' | 'note'>): void {
+    const batch = this.loadBatch(id);
+    const target = batch.targets.find(row => row.channel === input.channel);
+    if (!target || !['unknown', 'in_review', 'approved', 'rejected'].includes(input.review_state) ||
+      !['unknown', 'live', 'not_live'].includes(input.availability_state) ||
+      !input.source.trim() || input.source.length > 512 || input.note.length > 2048 ||
+      /[\u0000-\u001f\u007f]/.test(input.source) || /[\u0000\u007f]/.test(input.note) ||
+      !Number.isFinite(Date.parse(input.observed_at)) || Date.parse(input.observed_at) > Date.now() + 300000)
+      throw new Error('invalid manual observation');
+    const document: ManualObservation = { ...input, batch_digest: batch.digest, version_code: batch.version_code,
+      artifact_sha256: target.artifact.sha256, recorded_at: new Date().toISOString() };
+    this.db.prepare('INSERT INTO manual_observations(batch_id,channel,document) VALUES (?,?,?)')
+      .run(id, input.channel, JSON.stringify(document));
+  }
+
+  manualObservations(id: string, channel?: Channel): ManualObservation[] {
+    return (channel
+      ? rows<{ document: string }>(this.db, 'SELECT document FROM manual_observations WHERE batch_id=? AND channel=? ORDER BY id', id, channel)
+      : rows<{ document: string }>(this.db, 'SELECT document FROM manual_observations WHERE batch_id=? ORDER BY id', id))
+      .map(row => JSON.parse(row.document) as ManualObservation);
+  }
+
+  invalidateAccountToken(channel: Channel, account: string, clientId: string): void {
+    const scope = tokenScope(channel, account, clientId);
+    const pending = row<{ effect: string }>(this.db, 'SELECT effect FROM token_leases WHERE scope=?', scope);
+    if (pending && ['intent', 'unknown'].includes(pending.effect)) throw new Error('账号令牌请求待核对，更新凭据前须保留并处理该记录');
+    this.db.prepare("UPDATE token_leases SET token='', expires_at='' WHERE scope=?").run(scope);
+  }
+
+  forgetAccountMaterials(channel: Channel, account: string, clientIds: string[] = []): void {
+    const scopes = new Set<string>(clientIds.map(clientId => tokenScope(channel, account, clientId)));
+    const targets: string[] = [];
+    for (const id of this.batchIds()) for (const target of this.loadBatch(id).targets) {
+      if (target.channel !== channel || target.account !== account) continue;
+      scopes.add(tokenScope(channel, account, target.client_id ?? target.account));
+      targets.push(id);
+    }
+    // Keep token leases and operation receipts: forgetting credentials must not erase an unresolved intent.
+    this.tx(() => {
+      for (const scope of scopes) this.db.prepare("UPDATE token_leases SET token='', expires_at='' WHERE scope=?").run(scope);
+      for (const id of targets) this.db.prepare('DELETE FROM materials WHERE operation_id IN (SELECT id FROM operations WHERE batch_id=? AND channel=?)').run(id, channel);
+    });
+  }
   private tx<T>(use: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
     try { const result = use(); this.db.exec('COMMIT'); return result; }

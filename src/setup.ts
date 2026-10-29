@@ -33,22 +33,20 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     io.write('请从上方渠道中选择，名称不能重复。例如只发布到华为时输入 huawei。\n');
   }
   let packageName = '';
-  if (selection.some(channel => ['xiaomi', 'oppo', 'vivo'].includes(channel))) {
+  {
     do {
-      packageName = await ask('应用包名（如 com.example.app；小米、OPPO、vivo 共用，须与 APK 一致）',
-        previous?.channels.find(row => ['xiaomi', 'oppo', 'vivo'].includes(row.channel))?.app_id);
-      if (!validPackage(packageName)) io.write('请输入 APK 中的包名，例如 com.example.app。也可先用 android-release inspect --apk /绝对路径/app.apk 查看。\n');
+      packageName = await ask('应用包名（如 com.example.app；所有渠道包须与此一致）',
+        previous?.package_name ?? previous?.channels.find(row => ['xiaomi', 'oppo', 'vivo'].includes(row.channel))?.app_id);
+      if (!validPackage(packageName)) io.write('请输入应用包名，例如 com.example.app。首次配置无需提供 APK。\n');
     } while (!validPackage(packageName));
   }
   const rows: ProjectChannel[] = [];
-  if (selection.some(channel => channel !== 'oppo'))
-    io.write('\n账号备注由你命名，用来区分本机保存的发布账号；同一渠道账号请始终使用同一备注。只有一个账号时直接回车。\n');
+  io.write('\n账号备注由你命名，用来区分本机保存的发布账号；同一渠道账号请始终使用同一备注。只有一个账号时直接回车。\n');
   for (const channel of selection) {
     const saved = previous?.channels.find(row => row.channel === channel);
     io.write(`\n${channelNames[channel]}（${channel}）\n`);
     let account: string;
-    if (channel === 'oppo') account = await required('OPPO client_id（从开发者后台的 API 接入资料复制）', saved?.account);
-    else {
+    {
       for (;;) {
         account = await ask('账号备注', saved?.account || `${channel}-main`);
         if (validId(account)) break;
@@ -60,6 +58,7 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     const row: ProjectChannel = { channel, account, app_id: appId };
     const labels: Partial<Record<Channel, string>> = {
       honor: '荣耀 client_id（API 客户端 ID，与 client_secret 配对；从后台 API 接入资料复制）',
+      oppo: 'OPPO client_id（从开发者后台的 API 接入资料复制）',
       xiaomi: '小米 userName（自动发布 API 使用的开发者账号）',
       vivo: 'vivo access_key（API 接入标识，与 access_secret 配对；从后台复制）',
       tencent: '应用宝 uid（主开发者账号的用户 ID，不是应用 AppID）',
@@ -74,13 +73,14 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     }
     rows.push(row);
   }
-  const project: Project = { schema_version: 2, project_id: projectId, channels: rows };
+  const project: Project = { schema_version: 2, project_id: projectId, package_name: packageName, channels: rows };
+  if (previous?.display_name) project.display_name = previous.display_name;
   validateProject(project);
   io.write(`\n即将保存的应用配置：${projectId}\n`);
   for (const row of rows) {
     const clientNames: Partial<Record<Channel, string>> = { honor: 'client_id', xiaomi: 'userName', vivo: 'access_key', tencent: 'uid' };
     io.write(`${channelNames[row.channel]}：${['xiaomi', 'oppo', 'vivo'].includes(row.channel) ? '包名' : 'App ID'} ${row.app_id}；` +
-      `${row.channel === 'oppo' ? 'client_id' : '账号备注'} ${row.account}${row.client_id ? `；${clientNames[row.channel]} ${row.client_id}` : ''}\n`);
+      `账号备注 ${row.account}${row.client_id ? `；${clientNames[row.channel] ?? 'client_id'} ${row.client_id}` : ''}\n`);
     if (row.icon_path) io.write(`  图标：${row.icon_path}\n  隐私政策：${row.privacy_url}\n`);
     if (row.language_id) io.write(`  更新说明语言：${row.language_id}\n`);
   }

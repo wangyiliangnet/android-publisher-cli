@@ -33,7 +33,7 @@ export function regularFile(file: string, maxBytes: number, privateOnly = false)
   noSymlinkAncestors(file);
   const st = fs.lstatSync(file);
   if (!st.isFile() || st.isSymbolicLink() || st.size > maxBytes || st.size < 0) throw new Error('file is not an allowed regular file');
-  if (privateOnly && ((st.mode & 0o077) !== 0 || st.uid !== process.getuid?.())) throw new Error('file must belong to its owner and have mode 0600');
+  if (privateOnly && ((st.mode & 0o7777) !== 0o600 || st.uid !== process.getuid?.())) throw new Error('file must belong to its owner and have mode 0600');
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
     const opened = fs.fstatSync(fd);

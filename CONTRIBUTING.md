@@ -1,6 +1,6 @@
 # 贡献指南
 
-本页面向修改代码和文档的贡献者。使用工具发布 Android 应用，请从 [README](README.md) 开始。提交改动前，你需要验证命令行为、发布记录兼容性，以及中断后是否可能重复提交。
+本页面向修改代码和文档的贡献者。使用工具发布 Android 应用，请从 [README](README.md) 开始。提交改动前，你需要验证命令行为、两端共享的发布状态，以及中断后是否可能重复提交。
 
 ## 准备开发环境
 
@@ -13,7 +13,7 @@ npm run check
 
 `npm run check` 依次执行 TypeScript 类型检查、构建和 Node.js 测试。测试使用临时文件与模拟商店响应，不访问真实商店或提交应用。
 
-需要验证真实 APK 的检查与签名时，按[安装说明](docs/getting-started.md#安装-android-工具)准备 SDK Build-Tools、Command-line Tools、SDK Platform 和 JDK，然后运行：
+需要验证真实 APK 的检查与签名时，按[安装说明](docs/getting-started.md#贡献者生成测试-apk)准备 SDK Build-Tools、Command-line Tools、SDK Platform 和 JDK，然后运行：
 
 ```sh
 PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
@@ -46,3 +46,13 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 渠道协议由本仓库独立实现，复用第三方代码前须核对许可证。真实账号、APK、私钥、Cookie、带签名的上传地址和原始响应不能进入 Git、issue 或构建产物。示例使用 `com.example.app`、`example.invalid` 等虚构资料。
 
 发布本工具的新版本，按 [CLI 发版流程](docs/npm-release.md)创建版本 PR 和 GitHub Release。代码测试、PR、打包或 CLI 发版均不构成 Android 应用提审授权。
+
+## 浏览器回归
+
+Web 用户旅程和凭据表单有独立的合成数据浏览器回归。普通检查跳过此项；本机已提供 Playwright 和 Chrome 时，可以启用：
+
+```sh
+PUBLISHER_BROWSER_TESTS=1 PUBLISHER_BROWSER_CHANNEL=chrome npm run check
+```
+
+Playwright 不在默认模块路径时，用 `PUBLISHER_PLAYWRIGHT_MODULE` 指定其 `index.mjs` 入口。回归使用新的浏览器上下文和临时状态，覆盖接入、草稿恢复、修改材料、单次确认、部分失败重试、未决提交、人工记录、移动端及凭据清空。共享后端集成测试验证离开页面后提交继续，刷新不会重复写入。全部渠道响应均为合成数据。
