@@ -10,10 +10,10 @@ export interface SetupIO {
 }
 
 export async function configureProject(projectId: string, io: SetupIO, previous?: Project): Promise<Project> {
-  if (!validId(projectId)) throw new Error('项目名只能包含字母、数字、点、横线和下划线，须以字母或数字开头，最多 128 个字符');
+  if (!validId(projectId)) throw new Error('应用配置名只能包含字母、数字、点、横线和下划线，须以字母或数字开头，最多 128 个字符');
   const ask = async (label: string, fallback = ''): Promise<string> => {
     const typed = (await io.ask(label, fallback)).trim();
-    if (typed.toLowerCase() === 'cancel') throw new Error('已取消配置，未保存项目');
+    if (typed.toLowerCase() === 'cancel') throw new Error('已取消配置，未保存应用配置');
     return typed || fallback;
   };
   const required = async (label: string, fallback = ''): Promise<string> => {
@@ -84,6 +84,6 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     if (row.icon_path) io.write(`  图标：${row.icon_path}\n  隐私政策：${row.privacy_url}\n`);
     if (row.language_id) io.write(`  更新说明语言：${row.language_id}\n`);
   }
-  if ((await ask('输入 yes 保存配置')) !== 'yes') throw new Error('已取消配置，未保存项目');
+  if ((await ask('输入 yes 保存配置')) !== 'yes') throw new Error('已取消配置，未保存应用配置');
   return project;
 }

@@ -33,7 +33,7 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 | npm 打包与发布 | [安装包验收](docs/npm-package.md)、[CLI 发版](docs/npm-release.md) | 安装实际压缩包，检查文件清单、命令入口和版本 |
 | 使用文档 | [README](README.md) 的阅读入口 | 先说明任务和作用，再给步骤、成功判断和失败处理 |
 
-每个用户概念使用同一名称。用户文档称 `project` 为“应用配置”，`batch` 为“发布批次”，`approval` 为“提交计划”，并在首次出现时对应到命令字段。维护文档保留必要的状态、表和类型名称。
+每个用户概念使用[领域词汇表](GLOSSARY.md)中的名称。用户文档称 `project` 为“应用配置”，`batch` 为“发布批次”，`target` 为“渠道目标”，`approval` 为“提交计划”，并在首次出现时对应到命令字段。维护文档保留必要的状态、表和类型名称。
 
 ## 分支、检查与 PR
 
