@@ -54,10 +54,19 @@ class Terminal implements TerminalIO {
   private io: readline.Interface | undefined;
   private input(): readline.Interface {
     if (!process.stdin.isTTY) throw new Error('此操作需要终端交互。查询可使用 --json。');
-    return this.io ??= readline.createInterface({ input: process.stdin, output: process.stderr });
+    if (!this.io) {
+      this.io = readline.createInterface({ input: process.stdin, output: process.stderr });
+      this.io.on('SIGINT', () => { this.io?.close(); process.kill(process.pid, 'SIGINT'); });
+    }
+    return this.io;
   }
   async ask(label: string, fallback = ''): Promise<string> {
-    const answer = (await this.input().question(`${label}${fallback ? ` [${fallback}]` : ''}：`)).trim();
+    const input = this.input();
+    let onClose: (() => void) | undefined;
+    const closed = new Promise<string>((_resolve, reject) => { onClose = () => reject(new Canceled()); input.once('close', onClose); });
+    let answer: string;
+    try { answer = (await Promise.race([input.question(`${label}${fallback ? ` [${fallback}]` : ''}：`), closed])).trim(); }
+    finally { if (onClose) input.removeListener('close', onClose); }
     if (answer.toLowerCase() === 'cancel') throw new Canceled();
     return answer || fallback;
   }
@@ -188,7 +197,10 @@ export async function run(args: string[], injected: { application?: PublisherApp
         if (application().vault.has(row.channel, row.account)) continue;
         io.write(`连接${channelNames[row.channel]}：凭据仅在此终端输入，验证后安全保存。\n`); io.suspend();
         try { await application().updateAccount(row.channel, row.account, await prompt.forChannel(row.channel)); }
-        catch (error) { io.write(`${channelNames[row.channel]}：${publicError(error)}\n修复：android-release account update ${row.channel} ${row.account}\n`); }
+        catch (error) {
+          if (/canceled|取消/.test(publicError(error))) throw new Canceled();
+          io.write(`${channelNames[row.channel]}：${publicError(error)}\n修复：android-release account update ${row.channel} ${row.account}\n`);
+        }
       }
       prompt.clear();
       const checked = await application().checkApp(id); errorsText(checked.errors);
@@ -327,6 +339,11 @@ export async function run(args: string[], injected: { application?: PublisherApp
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] !== 'web') process.once('SIGINT', () => {
+    if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    process.stderr.write('\n已中断，已有发布记录保留。\n');
+    process.exit(130);
+  });
   if (process.env.NODE_USE_ENV_PROXY !== '0' && (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy)) setGlobalProxyFromEnv();
   run(process.argv.slice(2)).then(code => { process.exitCode = code; }).catch(error => {
     const message = publicError(error);

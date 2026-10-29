@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 30
     env:
       PUBLISHER_REQUIRE_ANDROID_TESTS: '1'
+      PUBLISHER_KEYCHAIN_TESTS: '1'
     steps:
       - name: Check out public source and history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +65,14 @@ jobs:
           test "$(node --version)" = "v$(cat .node-version)"
           test "$(npm --version)" = '11.19.1'
           npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          export PUBLISHER_MANAGED_TEST_ROOT="$RUNNER_TEMP/publisher-checker"
+          NODE_USE_ENV_PROXY=1 node --input-type=module <<'JS'
+          import { ensureRuntime } from './build/runtime.js';
+          const root = process.env.PUBLISHER_MANAGED_TEST_ROOT;
+          if (!root) throw new Error('isolated checker root is required');
+          await ensureRuntime(root, message => console.error(message));
+          JS
           npm run check
 
       - name: Pack and install the checked CLI

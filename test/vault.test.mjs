@@ -60,3 +60,13 @@ test('credential material requires the exact private-file mode', async t => {
   assert.equal(regularFile(file, 1024, true).toString(), '{}');
   fs.chmodSync(file, 0o400); assert.throws(() => regularFile(file, 1024, true), /0600/);
 });
+
+test('malformed credential JSON never appears in diagnostics', async () => {
+  const { validateCredentials } = await import('../build/credentials.js');
+  const input = 'synthetic-private-material-not-json';
+  assert.throws(() => validateCredentials('huawei', { service_account_json: input }), error => {
+    assert.match(error.message, /JSON 凭据材料格式无效/);
+    assert.ok(!error.message.includes(input));
+    return true;
+  });
+});

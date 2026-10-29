@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { type Channel, digest, isChannel, validAbsolute, validId } from './model.js';
-import { type CredentialSet, type CredentialSource, credentialFields } from './credentials.js';
+import { type CredentialSet, type CredentialSource, validateCredentials } from './credentials.js';
 import { readJSON, writePrivate } from './private-file.js';
 
 export interface KeyStore {
@@ -40,17 +40,6 @@ export class MacKeyStore implements KeyStore {
       { encoding: 'utf8', timeout: 30000, maxBuffer: 4096 });
     if (result.status !== 0 && result.status !== 44) throw new Error('无法清除 macOS 钥匙串中的凭据');
   }
-}
-
-export function validateCredentials(channel: Channel, value: unknown): CredentialSet {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid credential material');
-  const fields = credentialFields[channel];
-  const values = value as Record<string, unknown>;
-  if (Object.keys(values).some(key => !fields.includes(key) && !(channel === 'xiaomi' && key === 'test_account_json')) ||
-    fields.some(key => !values[key])) throw new Error('missing channel credential fields');
-  for (const entry of Object.values(values)) if (typeof entry !== 'string' || !entry ||
-    Buffer.byteLength(entry) > 65536 || /[\u0000\u007f]/.test(entry)) throw new Error('invalid credential material');
-  return values as CredentialSet;
 }
 
 export class CredentialVault {

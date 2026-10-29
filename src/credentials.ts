@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import tty from 'node:tty';
-import { type Channel } from './model.js';
+import { type Channel, parseStrictJSON } from './model.js';
 import { regularFile } from './private-file.js';
 
 export type CredentialSet = Record<string, string>;
@@ -14,6 +14,21 @@ export const credentialFields: Record<Channel, readonly string[]> = {
   vivo: ['access_secret'],
   tencent: ['api_secret'],
 };
+
+export function validateCredentials(channel: Channel, value: unknown): CredentialSet {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid credential material');
+  const fields = credentialFields[channel];
+  const values = value as Record<string, unknown>;
+  if (!fields || Object.keys(values).some(key => !fields.includes(key) && !(channel === 'xiaomi' && key === 'test_account_json')) ||
+    fields.some(key => !values[key])) throw new Error('missing channel credential fields');
+  for (const entry of Object.values(values)) if (typeof entry !== 'string' || !entry ||
+    Buffer.byteLength(entry) > 65536 || /[\u0000\u007f]/.test(entry)) throw new Error('invalid credential material');
+  for (const field of ['service_account_json', 'test_account_json']) if (values[field]) {
+    try { parseStrictJSON(values[field] as string); }
+    catch { throw new Error(`${channel}：JSON 凭据材料格式无效，请检查私有文件`); }
+  }
+  return values as CredentialSet;
+}
 
 const credentialLabels: Record<Channel, Record<string, string>> = {
   huawei: { service_account_json: '华为服务账号 JSON 文件的绝对路径' },
@@ -76,6 +91,7 @@ export class PromptCredentials implements CredentialSource {
         credentials.test_account_json = value;
       }
     }
+    validateCredentials(channel, credentials);
     this.cache.set(channel, credentials);
     return credentials;
   }

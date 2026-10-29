@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { type ArtifactInspector } from './artifact.js';
 import { channelAdapter } from './channels/index.js';
 import { protocols } from './channels/capabilities.js';
-import { type CredentialSet, type CredentialSource } from './credentials.js';
+import { type CredentialSet, type CredentialSource, validateCredentials } from './credentials.js';
 import { loadProject, prepare, preflight, previewBatch, publicError, reconcile, refresh, review, saveProject, submit, validateSubmission } from './engine.js';
 import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, isChannel, validHash, validId, validPackage, validateProject } from './model.js';
 import { dataRoot, hashFile, privateDir, readJSON, writePrivate } from './private-file.js';
@@ -142,6 +142,7 @@ export class PublisherApplication {
     return { channels, errors };
   }
   async updateAccount(channel: Channel, account: string, credentials: CredentialSet): Promise<void> {
+    validateCredentials(channel, credentials);
     const apps = this.apps().filter(app => app.channels.some(row => row.channel === channel && row.account === account));
     if (!apps.length) throw new Error('账号尚未关联应用，请先运行 android-release app add');
     for (const clientId of new Set(apps.map(app => {
