@@ -1,38 +1,47 @@
 # Android 发布工具
 
-`android-release` 是运行在 Apple Silicon Mac 上的命令行工具。它为华为、荣耀、小米、OPPO、vivo 和应用宝提交已有应用的 Android 版本更新。发布策略固定为审核通过后立即发布。
+`android-release` 帮你把同一个 Android 应用的版本更新提交到华为、荣耀、小米、OPPO、vivo 和应用宝。它在 Apple Silicon Mac 上运行，使用你已打包并签名的 APK，更新商店里已有的应用。
 
-先用 `setup` 保存渠道公开信息。`prepare` 会显示 APK 的包名和版本，确认后冻结产物与批次。提交前，你需要审阅批准文件，并明确授权应用、产物和渠道范围。渠道受理提交不表示审核通过或公开上架。
+你先保存各商店的应用资料。每次发版时，提供 APK 和更新说明，检查渠道账号，核对提交计划，再执行提交。工具会保留每个渠道的进度，供你查询审核结果和处理中断。发布方式固定为审核通过后立即上架。
 
-## 安装
+## 从安装到完成一次发布
 
-安装 [`.node-version`](.node-version) 指定的 Node.js，以及 Android SDK Build Tools 和 JDK。然后安装 npm 包：
+| 阶段 | 你要完成的事 | 命令与说明 |
+| --- | --- | --- |
+| 首次使用 | 安装工具，检查 APK 检查环境 | `doctor`，[安装与环境检查](docs/getting-started.md) |
+| 配置应用 | 保存要更新的应用、渠道和账号资料，以后复用 | `setup`，[配置应用与渠道账号](docs/configuration.md) |
+| 每次发版 | 保存本次 APK 和更新说明，生成一个发布批次 | `prepare`，[发布应用更新](docs/release-workflow.md) |
+| 提交前 | 检查账号权限和现有版本，核对要提交的内容 | `batch preflight`、`batch review` |
+| 提交审核 | 上传 APK，向选定商店提交更新 | `batch submit` |
+| 提交后 | 查看受理、审核与上架结果，处理中断 | `batch status`，[查询结果与处理中断](docs/status-and-recovery.md) |
+
+“应用配置”保存长期复用的资料；“发布批次”保存某一次更新的具体版本和进度。一个应用配置可以建立多个发布批次。一个批次在每个渠道只提交一个 APK。
+
+## 开始使用
+
+准备 Node.js 24.22.0 和 npm 11.19.1，再安装：
 
 ```sh
 npm install --global android-publisher-cli
-android-release version --json
+android-release version
 android-release doctor
 ```
 
-`version` 应显示已安装的版本。`doctor` 的 `ready` 为 `true` 时，表示 CLI 找到了 APK 检查工具。工具缺失时，按[安装与配置](docs/getting-started.md)检查 SDK 和 JDK 路径。
+`doctor` 会列出缺失的 Android 工具、安装位置和修复步骤。环境检查通过后，运行 `android-release setup --project demo`，把 `demo` 换成你给应用配置取的名字。完整步骤见[安装与环境检查](docs/getting-started.md)。
 
-## 文档
+六个渠道目前通过了模拟接口测试，尚未完成逐个真实账号验证。正式提交前，请先用获准的测试应用验证账号权限和结果。提交命令会访问真实商店；“渠道已受理”只表示收到提交，审核和上架结果还要分别查询。
 
-| 你要做的事 | 阅读 |
+## 按需查阅
+
+| 需要解决的问题 | 文档 |
 | --- | --- |
-| 安装 CLI、配置应用、输入凭据 | [安装与配置](docs/getting-started.md) |
-| 准备批次、预检、审阅并提交 | [发布应用更新](docs/release-workflow.md) |
-| 查询审核与上架状态、处理中断 | [状态查询与恢复](docs/status-and-recovery.md) |
-| 修改代码、测试或提交 PR | [贡献指南](CONTRIBUTING.md) |
-| 理解执行约束和渠道接口 | [架构说明](docs/architecture.md)、[渠道协议](docs/channels/protocol-evidence.md) |
-| 检查 npm 包或发布 CLI 版本 | [npm 包验收](docs/npm-package.md)、[CLI 版本发布](docs/npm-release.md) |
+| 查看全部命令、参数和退出码 | [命令参考](docs/commands.md) |
+| 反馈故障、处理密钥泄露 | [安全与问题反馈](SECURITY.md) |
+| 修改代码、运行测试、提交 PR | [贡献指南](CONTRIBUTING.md) |
+| 理解发布记录和恢复逻辑 | [开发者架构说明](docs/architecture.md) |
+| 修改商店接口 | [渠道接口与验证范围](docs/channels/protocol-evidence.md) |
+| 检查安装包、发布本工具的新版本 | [npm 安装包验收](docs/npm-package.md)、[发布 CLI 版本](docs/npm-release.md) |
 
-## 数据与验证范围
+配置、APK 副本和发布记录保存在本机。渠道密钥按命令提示输入；文件要求见[账号密钥](docs/configuration.md#账号密钥)。备份和迁移见[本机数据](docs/status-and-recovery.md#本机数据与备份)。
 
-CLI 在终端读取渠道凭据。JSON 和 PEM 材料由终端提示读取本机私有文件；文件须属于当前用户，权限为 `0600`。项目、冻结产物、操作日志、短期令牌和上传授权保存在 `~/Library/Application Support/AndroidPublisherCLI/v2/`。
-
-六个渠道通过了合成响应测试，真实账号仍需逐一验证。运行测试或安装 npm 包不授予渠道提审权限。真实提交前，先核对应用、APK 和渠道的授权范围。
-
-## 许可证
-
-原创代码采用 [MIT 许可证](LICENSE)。依赖和协议来源见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目独立于各渠道厂商。
+原创代码采用 [MIT 许可证](LICENSE)。依赖和来源见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目独立于各商店厂商。
