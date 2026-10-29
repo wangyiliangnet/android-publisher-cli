@@ -1,49 +1,53 @@
 # 命令参考
 
-本页用于查参数。首次操作请从[安装](getting-started.md)、[配置](configuration.md)和[发布流程](release-workflow.md)开始，了解每一步的作用。
+每个命令支持 `--help`。省略应用名称时，单个应用自动选中，多个应用引导选择。
 
-示例中的 `ID` 是应用配置名或发布批次名，`FILE` 是本机文件的绝对路径，`SHA256` 是提交计划中的 `approval_plan`。命令中的渠道名称为 `huawei`、`honor`、`xiaomi`、`oppo`、`vivo`、`tencent`。
-
-## 安装检查与配置
-
-| 命令 | 用途 |
+| 命令 | 作用 |
 | --- | --- |
-| `android-release version [--json]` | 查看 CLI 版本；`--json` 同时显示 Node.js 版本与平台 |
-| `android-release doctor [--json] [--sdk-root DIR] [--java-home DIR]` | 检查本机 Android 工具，失败时显示修复步骤 |
-| `android-release inspect --apk FILE [--sdk-root DIR] [--java-home DIR]` | 检查 APK 签名、包名、版本和 CPU 架构 |
-| `android-release setup --project ID [--replace]` | 用交互向导保存应用配置；`--replace` 修改已有配置 |
-| `android-release prepare --file FILE [--sdk-root DIR] [--java-home DIR]` | 读取本次发布配置，确认 APK 后保存发布批次 |
-| `android-release --help` | 查看命令列表 |
+| `app add [应用]` | 首次配置应用和渠道，终端接入凭据并检查访问。 |
+| `app edit [应用]` | 修改长期资料，保留已有发布内容。 |
+| `app list [--json]` | 查看应用与渠道。 |
+| `publish [应用]` | 准备、检查、核对并提交；也可继续已有发布。 |
+| `status [应用]` | 刷新最近一次发布的结果。 |
+| `history [应用] [--json]` | 离线列出该应用的历史发布。 |
+| `account list [--json]` | 列出账号备注、凭据可用性和关联应用。 |
+| `account update [渠道] [账号]` | 在终端录入凭据，验证后保存。 |
+| `account forget [渠道] [账号]` | 确认受影响应用后清除本机凭据与授权材料，保留操作记录。 |
+| `doctor [--repair] [--json]` | 检查组件；`--repair` 下载并校验固定组件。 |
+| `web [--port 端口] [--no-open]` | 启动仅本机可访问的浏览器工作台。 |
+| `protocols [--json]` | 查看渠道能力与真实验证范围。 |
+| `version [--json]` | 查看工具版本。 |
 
-`--sdk-root` 与 `--java-home` 只影响本次命令。希望后续命令也使用相同目录时，设置 `ANDROID_SDK_ROOT` 与 `JAVA_HOME`，见[环境检查](getting-started.md#运行检查并修复问题)。
+以上命令都加 `android-release` 前缀。
 
-## 发布与查询
+## 发布参数
 
-以下每条命令都以 `android-release batch` 开头。
+`--apk 渠道=路径` 可重复使用，显式对应文件。未指定的渠道在交互中补齐。相对路径按当前目录解析。
 
-| 后续命令 | 用途 |
+`--channels huawei,honor` 明确选择本次范围，默认使用应用已配置的全部渠道。只有本次选中的渠道需要 APK。
+
+`--notes-file 路径` 读取 UTF-8 更新说明。省略时选择粘贴文本或读取文件；多行输入用单独一行 `:end` 完成。
+
+材料与渠道检查通过后，终端展示摘要。输入 `yes` 才会上传和提交。每次确认覆盖展示的应用、产物、渠道、账号、更新说明和发布方式。
+
+## 状态参数
+
+- `--cached`：只查看本机已保存结果。
+- `--release 记录`：选择历史发布，记录名可由 `history` 获取。
+- `--json`：输出结构化结果，业务状态读取字段。
+- `--record-manual`：引导核对本次版本，追加人工记录。
+- `--reconcile`：只读核对未决请求，保留无法确认的阻塞。
+
+人工记录与远端核对分别使用。自动确认与人工结论分开展示。
+
+## 退出码
+
+| 代码 | 含义 |
 | --- | --- |
-| `preflight --batch ID [--channels LIST]` | 检查商店账号与现有版本，不上传 APK |
-| `review --batch ID --file FILE [--channels LIST]` | 离线生成提交计划文件 |
-| `submit --batch ID --approval FILE --approve-plan SHA256` | 复核计划，上传 APK 并提交审核 |
-| `resume --batch ID --approval FILE --approve-plan SHA256` | 继续原发布，跳过已确认步骤 |
-| `status --batch ID` | 查看本机保存的状态 |
-| `status --batch ID --refresh [--channels LIST]` | 向商店查询最新状态 |
-| `reconcile --batch ID [--channels LIST]` | 只读核对中断请求，无法确认时保留阻塞 |
-| `report --batch ID --file FILE` | 将已保存状态导出为 Markdown |
+| `0` | 请求的任务完成。发布表示选定渠道全部受理；查询表示查询成功，审核结论另读结果字段。 |
+| `1` | 输入、组件、预检、执行或查询失败。 |
+| `2` | 部分渠道已受理，其余发生已确定的失败。 |
+| `3` | 发布或核对存在未决请求，需要先核对。 |
+| `130` | 用户取消或终端中断。已保存的进度可继续查看。 |
 
-`LIST` 是逗号分隔的渠道名称，例如 `huawei,honor`。生成提交计划时选定渠道，提交与继续执行使用计划里的范围；这两个命令也支持 `--sdk-root DIR` 和 `--java-home DIR`。状态与中断处理见[查询结果与处理中断](status-and-recovery.md)。
-
-`android-release history` 列出已有发布批次。`android-release protocols [--json]` 显示各渠道的查询能力、更新说明上限和验证范围，字段含义见[渠道接口与验证范围](channels/protocol-evidence.md)。这一步离线运行。
-
-## 输出与退出码
-
-`doctor` 和 `protocols` 默认输出中文说明，`--json` 输出结构化结果。`version` 默认输出版本号，`--json` 输出版本对象。其他命令将 JSON 结果写到标准输出，交互提示写到标准错误。
-
-| 退出码 | 含义 | 下一步 |
-| --- | --- | --- |
-| `0` | 命令已完成 | 按命令结果进入下一步；提交受理后仍需查询审核和上架 |
-| `2` | 参数、配置、文件或环境错误 | 查看 `error`；环境问题运行 `doctor`，修复后重试 |
-| `3` | 至少一个渠道失败或结果未确定 | 查看 `errors` 与 `recovery_required`，先核对再继续 |
-
-批次级 `recovery_required` 表示是否有渠道被未决令牌申请或发布请求阻塞。各渠道的 `recovery` 列出原因、操作记录和下一步。只核对部分渠道时，其他渠道的阻塞仍保留在汇总中；判断是否可继续，要同时查看渠道范围和恢复信息。
+发布既有失败又有未决请求时，以 `3` 为准。退出码不会把“已受理”解释为“已上架”。

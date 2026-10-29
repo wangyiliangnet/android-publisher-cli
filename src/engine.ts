@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { AndroidTools, inspectAndFreeze, verifyFrozen } from './artifact.js';
+import { type ArtifactInspector, inspectAndFreeze, verifyFrozen } from './artifact.js';
 import { channelAdapter } from './channels/index.js';
 import { validateChannelArtifact, validateReleaseNotes } from './channels/capabilities.js';
 import { ChannelError } from './channels/http.js';
@@ -34,9 +34,11 @@ export interface BatchPreview {
 
 function batchInputs(input: BatchInput, store: Store): { project: Project; notes: string } {
   validateBatchInput(input);
-  const project = loadProject(input.project_id, store.root);
+  const configured = loadProject(input.project_id, store.root);
   const selected = Object.keys(input.apks);
-  if (selected.length !== project.channels.length || project.channels.some(ch => !selected.includes(ch.channel))) throw new Error('one APK is required for every configured channel');
+  if (!selected.length || selected.some(channel => !configured.channels.some(row => row.channel === channel)))
+    throw new Error('APK selection contains an unconfigured channel');
+  const project = { ...configured, channels: configured.channels.filter(row => selected.includes(row.channel)) };
   const notes = new TextDecoder('utf-8', { fatal: true }).decode(regularFile(input.release_notes_file, 64 * 1024));
   validateReleaseNotes(notes, project.channels.map(target => target.channel));
   for (const target of project.channels) {
@@ -53,7 +55,7 @@ function checkPackageAppId(channel: Channel, appId: string, packageName: string)
     throw new Error(channel + ': configured app ID differs from APK package');
 }
 
-export function previewBatch(input: BatchInput, tools: AndroidTools, store: Store): BatchPreview {
+export function previewBatch(input: BatchInput, tools: ArtifactInspector, store: Store): BatchPreview {
   const { project } = batchInputs(input, store);
   let packageName = ''; let versionName = ''; let versionCode = ''; let signer = '';
   const apkHashes: Partial<Record<Channel, string>> = {};
@@ -78,7 +80,7 @@ export function previewBatch(input: BatchInput, tools: AndroidTools, store: Stor
     signer_sha256: signer, apk_sha256: apkHashes };
 }
 
-export function prepare(input: BatchInput, tools: AndroidTools, store: Store, expected: BatchPreview): Batch {
+export function prepare(input: BatchInput, tools: ArtifactInspector, store: Store, expected: BatchPreview): Batch {
   const { project, notes } = batchInputs(input, store);
   const targets: FrozenTarget[] = [];
   let packageName = ''; let versionName = ''; let versionCode = ''; let signer = '';
@@ -134,6 +136,8 @@ export async function preflight(store: Store, batchId: string, credentials: Cred
   const errors: Record<string, string> = {};
   for (const target of selectedTargets(batch, channels)) {
     try {
+      const row = store.target(batchId, target.channel);
+      if (row.phase === 'submitted' || store.operations(batchId, target.channel).length) continue;
       const secrets = await credentials.forChannel(target.channel);
       const adapter = channelAdapter(batch, target, secrets, store, fetcher);
       const result = await adapter.preflight();
@@ -149,7 +153,7 @@ function approvalBody(store: Store, batch: Batch, channels?: Channel[], requireR
   const hashes: Record<string, string> = {};
   for (const target of selected) {
     const row = store.target(batch.batch_id, target.channel);
-    if (!row.preflight_digest || requireReady && row.phase !== 'preflighted') throw new Error(`${target.channel}: a clean preflight is required`);
+    if (!row.preflight_digest || requireReady && !['preflighted', 'submitted'].includes(row.phase)) throw new Error(`${target.channel}: a clean preflight is required`);
     if (requireReady && store.operations(batch.batch_id, target.channel).some(op => ['intent', 'unknown'].includes(op.effect))) throw new Error(`${target.channel}: unresolved write blocks review`);
     preflightDigests[target.channel] = row.preflight_digest;
     hashes[target.channel] = target.artifact.sha256;
@@ -184,6 +188,10 @@ function validatedApproval(store: Store, batch: Batch, file: string, approvedPla
   if (canonical(approval) !== canonical(expected)) throw new Error('approval file or reviewed inputs changed');
   store.verifyApproval(approval);
   return approval;
+}
+
+export function validateSubmission(store: Store, batchId: string, file: string, approvedPlan: string): Approval {
+  return validatedApproval(store, store.loadBatch(batchId), file, approvedPlan);
 }
 
 function samePreflightMeaning(a: Preflight, b: Preflight): boolean {
@@ -234,11 +242,12 @@ async function runTarget(store: Store, batch: Batch, target: FrozenTarget, adapt
 }
 
 export async function submit(store: Store, batchId: string, approvalFile: string, approvedPlan: string,
-  credentials: CredentialSource, tools: AndroidTools, resume = false, fetcher: typeof fetch = fetch): Promise<Record<string, unknown>> {
+  credentials: CredentialSource, tools: ArtifactInspector, resume = false, fetcher: typeof fetch = fetch): Promise<Record<string, unknown>> {
   const batch = store.loadBatch(batchId);
   const approval = validatedApproval(store, batch, approvalFile, approvedPlan);
   // Verify every selected artifact before the first channel can write.
   for (const target of selectedTargets(batch, approval.selected_channels)) {
+    if (store.target(batchId, target.channel).phase === 'submitted') continue;
     verifyFrozen(tools, target.artifact);
     if (target.icon_path && (hashFile(target.icon_path).sha256 !== target.icon_sha256)) throw new Error('frozen icon changed');
     const row = store.target(batchId, target.channel);
@@ -247,6 +256,7 @@ export async function submit(store: Store, batchId: string, approvalFile: string
   const errors: Record<string, string> = {};
   for (const target of selectedTargets(batch, approval.selected_channels)) {
     try {
+      if (store.target(batchId, target.channel).phase === 'submitted') continue;
       const secrets = await credentials.forChannel(target.channel);
       const adapter = channelAdapter(batch, target, secrets, store, fetcher);
       await runTarget(store, batch, target, adapter, approval, resume);

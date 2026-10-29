@@ -1,62 +1,81 @@
 # Android 发布工具
 
-`android-release` 帮你把同一个 Android 应用的版本更新提交到华为、荣耀、小米、OPPO、vivo 和应用宝。它在 Apple Silicon Mac 上运行，使用你已打包并签名的 APK，更新商店里已有的应用。
+`android-release` 把已签名的渠道 APK 提交到华为、荣耀、小米、OPPO、vivo 和应用宝中已有的应用，并追踪每个渠道的结果。面向在 Apple Silicon Mac 上直接使用终端的开发者和发布负责人。
 
-你先保存各商店的应用资料。每次发版时，提供 APK 和更新说明，检查渠道账号，核对提交计划，再执行提交。工具会保留每个渠道的进度，供你查询审核结果和处理中断。发布方式固定为审核通过后立即上架。
+首次保存应用资料和渠道账号。每次发版为各渠道明确指定 APK，提供一份更新说明。工具自动检查、展示提交摘要，确认一次后提交。默认选择应用已配置的全部渠道，审核通过后立即上架。
 
-## 渠道能力与验证范围
+## 安装与开始使用
 
-六个渠道目前只通过模拟接口测试，尚未完成逐个真实账号和公开上架验证。正式提交前，先用获准的测试应用验证账号权限和结果。
-
-| 渠道 | 本次审核查询 | 本次上架确认 | 更新说明长度 |
-| --- | --- | --- | --- |
-| 华为 | 支持 | 支持 | 5～500 个字符 |
-| 荣耀 | 支持 | 需后台核对 | 5～500 个字符 |
-| 小米 | 需后台核对 | 需后台核对 | 5～500 个字符 |
-| OPPO | 支持 | 支持 | 5～500 个字符 |
-| vivo | 支持 | 支持 | 5～200 个字符 |
-| 应用宝 | 需后台核对 | 需后台核对 | 5～500 个字符 |
-
-“支持”表示当前实现能在本机已有受理记录、远端结果关联本次版本时确认状态，不代表已完成真实账号验证。“渠道已受理”只表示收到提交。六渠道均不能自动核对响应丢失的写入，结果未决时会阻止冲突发布。
-
-安装后运行 `android-release protocols` 查看能力说明，脚本使用 `protocols --json`。关联条件见[查询结果](docs/status-and-recovery.md#为什么有些状态一直无法确认)，中断处理见[恢复步骤](docs/status-and-recovery.md#报错或中断后继续)。
-
-## 从安装到完成一次发布
-
-| 阶段 | 你要完成的事 | 命令与说明 |
-| --- | --- | --- |
-| 首次使用 | 安装工具，检查 APK 检查环境 | `doctor`，[安装与环境检查](docs/getting-started.md) |
-| 配置应用 | 保存要更新的应用、渠道和账号资料，以后复用 | `setup`，[配置应用与渠道账号](docs/configuration.md) |
-| 每次发版 | 保存本次 APK 和更新说明，生成一个发布批次 | `prepare`，[发布应用更新](docs/release-workflow.md) |
-| 提交前 | 检查账号权限和现有版本，核对要提交的内容 | `batch preflight`、`batch review` |
-| 提交审核 | 上传 APK，向选定商店提交更新 | `batch submit` |
-| 提交后 | 查看受理、审核与上架结果，处理中断 | `batch status`，[查询结果与处理中断](docs/status-and-recovery.md) |
-
-“应用配置”保存长期复用的资料；“发布批次”保存某一次更新的具体版本和进度。一个应用配置可以建立多个发布批次。一个批次在每个渠道只提交一个 APK。
-
-## 开始使用
-
-准备 Node.js 24.22.0 和 npm 11.19.1，再安装：
+准备 Node.js 24.22.0 和 npm 11.19.1，然后运行：
 
 ```sh
 npm install --global android-publisher-cli
-android-release version
-android-release doctor
+android-release app add demo
+android-release publish demo
+android-release status demo
 ```
 
-`doctor` 会列出缺失的 Android 工具、安装位置和修复步骤。环境检查通过后，运行 `android-release setup --project demo`，把 `demo` 换成你给应用配置取的名字。完整步骤见[安装与环境检查](docs/getting-started.md)。
+首次配置无需 APK。账号凭据通过终端隐藏输入，验证后在本机安全保存，以后复用。APK 校验组件在首次发布时自动安装，无需配置 Android SDK 或 JDK。也可以提前运行 `android-release doctor --repair`。
 
-## 按需查阅
+日常发布也可直接指定文件，剩余渠道在交互中补齐：
 
-| 需要解决的问题 | 文档 |
+```sh
+android-release publish demo \
+  --apk huawei=/absolute/path/one.apk \
+  --apk honor=/absolute/path/two.apk \
+  --notes-file /absolute/path/notes.txt
+```
+
+`--apk` 明确绑定渠道与文件。文件名不会决定渠道归属。提交前会展示应用、版本、各渠道 APK、账号和更新说明。只有用户明确确认后才上传和提审。
+
+## 本地 Web 端
+
+```sh
+android-release web
+```
+
+命令启动 GitHub 风格的本地工作台，并打开浏览器。Web 和 CLI 共用应用、账号、冻结材料与发布记录，覆盖配置应用、逐渠道选包、预检、确认提交、继续发布、历史查询和人工核对。
+
+服务仅监听 `127.0.0.1`，按 Ctrl+C 停止。密钥仍在终端通过 `account update` 录入，Web 页面复用本机已保存的凭据。指定端口或手动打开浏览器时，使用 `web --port 3210 --no-open`。
+
+## 查看与继续
+
+```sh
+android-release publish demo
+android-release status demo
+android-release history demo
+```
+
+再次进入发布流程，可以继续已有记录。已受理的渠道和已确认步骤会跳过。结果未决时，工具保留记录并阻止冲突写入，先引导核对。
+
+提交受理、审核通过和公开上架分别展示。查询失败时保留上次结果和时间。无法自动确认的渠道，可以在后台核对后运行 `status demo --record-manual` 保存人工记录。
+
+## 渠道验证范围
+
+六个渠道目前以模拟接口测试为主，尚未完成逐个真实账号和公开上架验证。正式提交前，使用获准的测试应用验证账号权限与结果。
+
+| 渠道 | 本次审核查询 | 本次上架确认 |
+| --- | --- | --- |
+| 华为 | 支持 | 支持 |
+| 荣耀 | 支持 | 后台核对 |
+| 小米 | 后台核对 | 后台核对 |
+| OPPO | 支持 | 支持 |
+| vivo | 支持 | 支持 |
+| 应用宝 | 后台核对 | 后台核对 |
+
+“支持”要求本机有本次受理记录，且远端证据能关联本次版本。六渠道均不能自动解除响应丢失的写入。人工核对记录单独展示，也不能解除缺乏关联证据的未决请求。
+
+## 按任务查阅
+
+| 任务 | 文档 |
 | --- | --- |
-| 查看全部命令、参数和退出码 | [命令参考](docs/commands.md) |
-| 反馈故障、处理密钥泄露 | [安全与问题反馈](SECURITY.md) |
-| 修改代码、运行测试、提交 PR | [贡献指南](CONTRIBUTING.md) |
-| 理解发布记录和恢复逻辑 | [开发者架构说明](docs/architecture.md) |
-| 修改商店接口 | [渠道接口与验证范围](docs/channels/protocol-evidence.md) |
-| 检查安装包、发布本工具的新版本 | [npm 安装包验收](docs/npm-package.md)、[发布 CLI 版本](docs/npm-release.md) |
+| 安装与检查组件 | [安装说明](docs/getting-started.md) |
+| 应用和渠道账号 | [应用配置](docs/configuration.md) |
+| 每次发布的操作 | [发布流程](docs/release-workflow.md) |
+| 结果查询与中断恢复 | [状态与恢复](docs/status-and-recovery.md) |
+| 命令、参数和退出码 | [命令参考](docs/commands.md) |
+| 用户故事和交互约定 | [设计说明](docs/cli-design.md) |
+| 开发与测试 | [贡献指南](CONTRIBUTING.md)、[架构](docs/architecture.md) |
+| 故障和密钥泄露 | [安全反馈](SECURITY.md) |
 
-配置、APK 副本和发布记录保存在本机。渠道密钥按命令提示输入；文件要求见[账号密钥](docs/configuration.md#账号密钥)。备份和迁移见[本机数据](docs/status-and-recovery.md#本机数据与备份)。
-
-原创代码采用 [MIT 许可证](LICENSE)。依赖和来源见[第三方声明](THIRD_PARTY_NOTICES.md)。本项目独立于各商店厂商。
+配置、APK 副本和发布记录位于本机私有目录。原创代码采用 [MIT 许可证](LICENSE)，运行组件见[第三方声明](THIRD_PARTY_NOTICES.md)。项目独立于各商店厂商。

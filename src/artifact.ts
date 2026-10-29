@@ -5,6 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { type Artifact, validHash, validPackage, validVersion } from './model.js';
 import { freezeFile, hashFile } from './private-file.js';
 
+export interface ArtifactInspector {
+  inspect(apk: string): Omit<Artifact, 'path' | 'filename' | 'sha256' | 'size'>;
+}
+
 function latest(directory: string, file: string): string {
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(directory, { withFileTypes: true }); }
@@ -113,7 +117,7 @@ export function apkAbis(apk: string): string[] {
   } finally { fs.closeSync(fd); }
 }
 
-export function inspectAndFreeze(tools: AndroidTools, source: string, root: string): Artifact {
+export function inspectAndFreeze(tools: ArtifactInspector, source: string, root: string): Artifact {
   const hashed = hashFile(source);
   const inspected = tools.inspect(source);
   const after = hashFile(source);
@@ -124,7 +128,7 @@ export function inspectAndFreeze(tools: AndroidTools, source: string, root: stri
   return { path: frozen, filename: path.basename(source), sha256: hashed.sha256, size: hashed.size, ...inspected };
 }
 
-export function verifyFrozen(tools: AndroidTools, artifact: Artifact): void {
+export function verifyFrozen(tools: ArtifactInspector, artifact: Artifact): void {
   const hashed = hashFile(artifact.path);
   if (hashed.sha256 !== artifact.sha256 || hashed.size !== artifact.size) throw new Error('frozen APK differs from the reviewed artifact');
   const current = tools.inspect(artifact.path);

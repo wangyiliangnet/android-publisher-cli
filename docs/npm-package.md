@@ -6,7 +6,7 @@
 
 ## 构建并检查包内文件
 
-在仓库根目录，使用 [`.node-version`](../.node-version) 指定的 Node.js 和项目要求的 npm 版本。完整验收还需要 [Android SDK 和 JDK](getting-started.md#安装-android-工具)。
+在仓库根目录，使用 [`.node-version`](../.node-version) 指定的 Node.js 和项目要求的 npm 版本。生成测试 APK 的完整验收还需要 [开发用 Android SDK 和 JDK](getting-started.md#贡献者生成测试-apk)。
 
 ```sh
 npm ci --ignore-scripts
@@ -34,7 +34,7 @@ npm install --global --prefix "$prefix" --ignore-scripts "./$archive"
 
 校验应显示 `OK`。版本应与压缩包文件名和 `package.json` 一致，帮助应正常列出命令。CI 也会用独立目录安装已检查的压缩包。
 
-已配置 Android 工具时，可再运行 `"$prefix/bin/android-release" doctor`。诊断失败时按提示修复本机环境；脚本解析结果须使用 `doctor --json`。Android SDK Build-Tools、Command-line Tools、SDK Platform 和 JDK 由用户另行安装，不包含在 npm 包中。
+已配置 Android 工具时，可再运行 `"$prefix/bin/android-release" doctor`。诊断失败时按提示修复本机环境；脚本解析结果须使用 `doctor --json`。日常发布的检查组件由 `doctor --repair` 或首次 `publish` 自动下载和校验。用户无需配置 Android SDK 或 JDK。构建验收应同时检查 `web --help` 和独立校验器字节码已进入实际包。
 
 ## 交付与版本约束
 

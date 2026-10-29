@@ -1,6 +1,6 @@
 # 贡献指南
 
-本页面向修改代码和文档的贡献者。使用工具发布 Android 应用，请从 [README](README.md) 开始。提交改动前，你需要验证命令行为、发布记录兼容性，以及中断后是否可能重复提交。
+本页面向修改代码和文档的贡献者。使用工具发布 Android 应用，请从 [README](README.md) 开始。提交改动前，你需要验证命令行为、两端共享的发布状态，以及中断后是否可能重复提交。
 
 ## 准备开发环境
 
@@ -13,7 +13,7 @@ npm run check
 
 `npm run check` 依次执行 TypeScript 类型检查、构建和 Node.js 测试。测试使用临时文件与模拟商店响应，不访问真实商店或提交应用。
 
-需要验证真实 APK 的检查与签名时，按[安装说明](docs/getting-started.md#安装-android-工具)准备 SDK Build-Tools、Command-line Tools、SDK Platform 和 JDK，然后运行：
+需要验证真实 APK 的检查与签名时，按[安装说明](docs/getting-started.md#贡献者生成测试-apk)准备 SDK Build-Tools、Command-line Tools、SDK Platform 和 JDK，然后运行：
 
 ```sh
 PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
