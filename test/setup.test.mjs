@@ -26,13 +26,13 @@ test('Huawei setup explains identifiers and automatically selects the Chinese de
 });
 
 test('Xiaomi, OPPO and vivo share a single package question and keep separate API accounts', async () => {
-  const prompt = prompts(['xiaomi,oppo,vivo', 'com.example.app', '', 'example-user', '/example/icon.png',
+  const prompt = prompts(['xiaomi,oppo,vivo', 'com.example.app', '', 'developer@example.com', '/example/icon.png',
     'https://example.invalid/privacy', '', 'example-oppo-client', '', 'example-vivo-key', 'yes']);
   const project = await configureProject('example', prompt.io);
   assert.equal(prompt.remaining(), 0);
   assert.equal(prompt.labels.filter(({ label }) => label.startsWith('应用包名')).length, 1);
   assert.ok(project.channels.every(row => row.app_id === 'com.example.app'));
-  assert.equal(project.channels[0].client_id, 'example-user');
+  assert.equal(project.channels[0].client_id, 'developer@example.com');
   assert.equal(project.channels[1].account, 'oppo-main');
   assert.equal(project.channels[1].client_id, 'example-oppo-client');
   assert.equal(project.channels[2].client_id, 'example-vivo-key');
