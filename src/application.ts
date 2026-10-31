@@ -6,7 +6,7 @@ import { channelAdapter } from './channels/index.js';
 import { protocols } from './channels/capabilities.js';
 import { type CredentialSet, type CredentialSource, CredentialInputError, resolveCredentialInput, validateCredentials } from './credentials.js';
 import { loadProject, prepare, preflight, previewBatch, publicError, reconcile, refresh, review, saveProject, submit, validateSubmission } from './engine.js';
-import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, digest, isChannel, validHash, validId, validPackage, validateProject } from './model.js';
+import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, digest, isChannel, validClientId, validHash, validId, validPackage, validateProject } from './model.js';
 import { dataRoot, hashFile, privateDir, readJSON, writePrivate } from './private-file.js';
 import { ensureRuntime, runtimeDiagnostic } from './runtime.js';
 import { type ManualObservation, Store } from './state.js';
@@ -77,9 +77,9 @@ export class PublisherApplication {
     const knownAccounts = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()];
     for (const row of app.channels) for (const saved of knownAccounts) {
       if (row.channel === saved.channel && row.client_id && row.client_id === saved.client_id && row.account !== saved.account)
-        throw new Error('此 API 账号已接入，请选择已有发布账号。');
+        throw new Error('此 API 账号已接入，请选择已有渠道账号。');
       if (row.channel === saved.channel && row.account === saved.account && row.client_id && saved.client_id && row.client_id !== saved.client_id)
-        throw new Error('这个发布账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的发布账号。');
+        throw new Error('这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。');
     }
     const previous = this.apps().find(other => other.project_id === app.project_id);
     if (previous) this.registerAccounts(previous.channels);
@@ -220,7 +220,7 @@ export class PublisherApplication {
     return fs.readdirSync(directory).filter(name => /^[a-f0-9]{64}\.json$/.test(name)).flatMap(name => {
       try {
         const value = readJSON(path.join(directory, name), 4096, true) as Record<string, unknown>;
-        if (!isChannel(value.channel) || !validId(value.account) || value.client_id !== undefined && !validId(value.client_id) ||
+        if (!isChannel(value.channel) || !validId(value.account) || value.client_id !== undefined && !validClientId(value.channel, value.client_id) ||
           name !== `${digest([value.channel, value.account])}.json`) return [];
         return [{ channel: value.channel, account: value.account, ...(typeof value.client_id === 'string' ? { client_id: value.client_id } : {}) }];
       } catch { return []; }

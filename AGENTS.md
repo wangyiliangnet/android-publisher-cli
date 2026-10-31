@@ -19,3 +19,17 @@
 有 `.codegraph/` 索引时，定位代码先用 `codegraph explore`。没有该目录就直接使用仓库搜索工具。
 
 获准使用 subagents 时，限定路径和问题范围。审查者默认只读。协调者负责整合修订，并记录未解决问题。
+
+## Agent skills
+
+### Issue tracker
+
+任务和规格记录在 GitHub Issues。读写前先读 [issue tracker 配置](docs/agents/issue-tracker.md)。
+
+### Triage labels
+
+使用五个默认 triage 标签。分类前先读[标签映射](docs/agents/triage-labels.md)。
+
+### Domain docs
+
+采用单上下文（single-context）布局。探索代码或修改领域术语、架构决策前，先读[领域文档规则](docs/agents/domain.md)。

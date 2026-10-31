@@ -48,8 +48,8 @@ test('Web credential entry preserves multiline materials and clears every comple
   page.on('console', message => logs.push(message.text()));
   page.on('request', request => { if (request.url().endsWith('/api/upload')) uploads++; });
   const row = channel => page.locator('tr').filter({ has: page.getByText(channel + '-main', { exact: true }) });
-  const open = async channel => { await row(channel).getByRole('button', { name: /^(接入密钥|更新密钥)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
-  const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新密钥', exact: true }).waitFor(); };
+  const open = async channel => { await row(channel).getByRole('button', { name: /^(接入凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
+  const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新凭据', exact: true }).waitFor(); };
   const empty = handle => handle.evaluate(form => [...form.querySelectorAll('input,textarea')].every(control => control.value === ''));
   const noPersistence = async marker => {
     assert.equal(await page.evaluate(value => JSON.stringify(state).includes(value), marker), false);
@@ -116,6 +116,10 @@ test('Web credential entry preserves multiline materials and clears every comple
   const pem = '-----BEGIN PUBLIC KEY-----\nU1lOVEhFVElD\n-----END PUBLIC KEY-----\n';
   const testAccount = '{\n  "username": "synthetic-user",\n  "password": "synthetic-test-password-C9"\n}\n';
   const xiaomiSecret = 'synthetic value';
+  await page.locator('#credential-api_secret').fill(xiaomiSecret);
+  await page.locator('#credentials-form').evaluate(form => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  assert.match(await page.locator('#credential-error').textContent(), /API 公钥或证书 PEM/);
+  assert.equal(await page.locator('#credential-api_secret').inputValue(), '');
   await page.locator('#credential-api_secret').fill(xiaomiSecret);
   await page.locator('#credential-mode-public_key_pem').selectOption('text');
   await page.locator('#credential-text-public_key_pem').fill(pem);

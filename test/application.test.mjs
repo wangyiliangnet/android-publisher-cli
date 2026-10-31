@@ -68,6 +68,22 @@ test('application setup and explicit subset preparation are offline and freeze o
   await assert.rejects(f.app.prepareRelease({ ...f.input, channels: ['unknown'] }), /渠道/);
 });
 
+test('Xiaomi email developer accounts remain reusable after removing the channel', t => {
+  const f = fixture(t);
+  const project = f.app.app('demo');
+  const xiaomi = { channel: 'xiaomi', account: 'xiaomi-main', app_id: 'com.example.app',
+    client_id: 'developer+release@example.com', icon_path: '/private/synthetic/icon.png', privacy_url: 'https://example.com/privacy' };
+  f.app.saveApp({ ...project, channels: [...project.channels, xiaomi] }, true);
+  assert.equal(f.app.accounts().find(row => row.channel === 'xiaomi').client_id, xiaomi.client_id);
+  f.app.saveApp(project, true);
+  assert.deepEqual(f.app.accounts().find(row => row.channel === 'xiaomi'), {
+    channel: 'xiaomi', account: 'xiaomi-main', client_id: xiaomi.client_id, apps: [], app_names: [], saved: false,
+  });
+  for (const client_id of ['', ' developer@example.com', 'developer\n@example.com', 'a'.repeat(257)])
+    assert.throws(() => f.app.saveApp({ ...project, channels: [ { ...xiaomi, client_id } ] }, true), /client_id/);
+  assert.throws(() => f.app.saveApp({ ...project, channels: [{ ...project.channels[0], client_id: 'developer@example.com' }] }, true), /client_id/);
+});
+
 test('exact materials reuse a release; changed notes create visible related content', async t => {
   const f = fixture(t);
   const a = await f.app.prepareRelease(f.input);
@@ -202,7 +218,7 @@ test('renaming an archived API account cannot bypass an unresolved authorization
   const app = f.app.app('demo'); f.app.saveApp({ ...app, channels: app.channels.filter(row => row.channel !== 'honor') }, true);
   f.app.forgetAccount('honor', 'honor-main');
   assert.throws(() => f.app.saveApp({ schema_version: 2, project_id: 'another', package_name: 'com.example.app',
-    channels: [{ channel: 'honor', account: 'renamed', app_id: '123', client_id: 'example-client' }] }), /选择已有发布账号/);
+    channels: [{ channel: 'honor', account: 'renamed', app_id: '123', client_id: 'example-client' }] }), /选择已有渠道账号/);
   assert.throws(() => f.app.store.beginToken(scope), /unresolved/);
 });
 

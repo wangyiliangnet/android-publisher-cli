@@ -226,7 +226,7 @@ export async function run(args: string[], injected: { application?: PublisherApp
         if (await io.ask('输入 yes 清除') !== 'yes') throw new Canceled();
         application().forgetAccount(channel, account); out('本机凭据已清除。\n'); return 0;
       }
-      if (!selected.apps.length) throw new Error('这个账号暂未关联应用。请先在应用资料中选择此发布账号，再验证和更新凭据。');
+      if (!selected.apps.length) throw new Error('这个账号暂未关联应用。请先在应用资料中选择此渠道账号，再验证和更新凭据。');
       io.suspend(); const prompt = new PromptCredentials();
       try { await application().updateAccount(channel, account, await prompt.forChannel(channel)); }
       finally { prompt.clear(); }

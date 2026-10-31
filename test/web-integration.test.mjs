@@ -7,6 +7,71 @@ import { PublisherApplication } from '../build/application.js';
 import { CredentialVault } from '../build/vault.js';
 import { startWebServer } from '../build/web.js';
 
+test('Xiaomi onboarding accepts an email developer account and opens credential entry', {
+  skip: process.env.PUBLISHER_BROWSER_TESTS !== '1', timeout: 30000,
+}, async t => {
+  const { chromium } = await import(process.env.PUBLISHER_PLAYWRIGHT_MODULE || 'playwright');
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-xiaomi-onboarding-'));
+  const keys = new Map();
+  const vault = new CredentialVault(root, { get: id => keys.get(id), put: (id, value) => keys.set(id, Buffer.from(value)), delete: id => keys.delete(id) });
+  const publisher = new PublisherApplication({ root, vault });
+  const web = await startWebServer({ invoke: (action, payload) => action === 'doctor'
+    ? Promise.resolve({ ready: true, version: 'test', checks: [] }) : publisher.invoke(action, payload) }, { root });
+  let browser;
+  t.after(async () => { await browser?.close(); await web.close(); publisher.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  browser = await chromium.launch({ headless: true, ...(process.env.PUBLISHER_BROWSER_CHANNEL ? { channel: process.env.PUBLISHER_BROWSER_CHANNEL } : {}) });
+  const page = await browser.newPage();
+  await page.goto(web.url + '/#/setup/new');
+  await page.getByLabel('应用名称', { exact: true }).fill('示例应用');
+  await page.getByLabel('Android 包名', { exact: true }).fill('com.example.app');
+  await page.getByRole('button', { name: /下一步：选择商店/ }).click();
+  await page.locator('[data-setup-select=xiaomi]').check();
+  await page.getByRole('button', { name: /下一步：接入渠道账号/ }).click();
+  await page.locator('#channel-client_id').fill('developer+release@example.com');
+  await page.locator('#channel-icon_path').fill('/private/synthetic/../icon.png');
+  await page.locator('#channel-privacy_url').fill('https://example.com/privacy');
+  await page.getByRole('button', { name: '保存资料并接入小米凭据', exact: true }).click();
+  await page.getByText(/应用图标.*不要包含.*\.\./).waitFor({ timeout: 3000 });
+  await page.locator('#channel-icon_path').fill('/private/synthetic/icon.png');
+  await page.locator('#channel-privacy_url').fill('https://example.com/privacy?invalid=1');
+  await page.getByRole('button', { name: '保存资料并接入小米凭据', exact: true }).click();
+  await page.getByText(/请填写不带查询参数或片段的 HTTPS 隐私政策网页地址/).waitFor();
+  assert.equal(await page.locator('#channel-client_id').inputValue(), 'developer+release@example.com');
+  await page.locator('#channel-privacy_url').fill('https://example.com/privacy');
+  await page.getByRole('button', { name: '保存资料并接入小米凭据', exact: true }).click();
+  await page.locator('#credentials-form').waitFor({ state: 'visible', timeout: 3000 });
+  assert.equal(publisher.apps()[0].channels[0].client_id, 'developer+release@example.com');
+});
+
+test('package-based channels accept a valid Android package longer than 128 characters', {
+  skip: process.env.PUBLISHER_BROWSER_TESTS !== '1', timeout: 30000,
+}, async t => {
+  const { chromium } = await import(process.env.PUBLISHER_PLAYWRIGHT_MODULE || 'playwright');
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-long-package-'));
+  const keys = new Map();
+  const vault = new CredentialVault(root, { get: id => keys.get(id), put: (id, value) => keys.set(id, Buffer.from(value)), delete: id => keys.delete(id) });
+  const publisher = new PublisherApplication({ root, vault });
+  const web = await startWebServer({ invoke: (action, payload) => action === 'doctor'
+    ? Promise.resolve({ ready: true, version: 'test', checks: [] }) : publisher.invoke(action, payload) }, { root });
+  let browser;
+  t.after(async () => { await browser?.close(); await web.close(); publisher.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  browser = await chromium.launch({ headless: true, ...(process.env.PUBLISHER_BROWSER_CHANNEL ? { channel: process.env.PUBLISHER_BROWSER_CHANNEL } : {}) });
+  const page = await browser.newPage(), pkg = 'com.' + 'example'.repeat(19) + '.app';
+  await page.goto(web.url + '/#/setup/new');
+  await page.getByLabel('应用名称', { exact: true }).fill('示例应用');
+  await page.getByLabel('Android 包名', { exact: true }).fill(pkg);
+  await page.getByRole('button', { name: /下一步：选择商店/ }).click();
+  await page.locator('[data-setup-select=oppo]').check();
+  await page.getByRole('button', { name: /下一步：接入渠道账号/ }).click();
+  await page.locator('#channel-client_id').fill('invalid client');
+  await page.getByRole('button', { name: '保存资料并接入OPPO凭据', exact: true }).click();
+  await page.getByText(/API 客户端编号.*字母、数字.*128/).waitFor({ timeout: 3000 });
+  await page.locator('#channel-client_id').fill('example-client');
+  await page.getByRole('button', { name: '保存资料并接入OPPO凭据', exact: true }).click();
+  await page.locator('#credentials-form').waitFor({ state: 'visible', timeout: 3000 });
+  assert.equal(publisher.apps()[0].channels[0].app_id, pkg);
+});
+
 test('browser follows a real shared release across navigation without another submission', {
   skip: process.env.PUBLISHER_BROWSER_TESTS !== '1', timeout: 60000,
 }, async t => {

@@ -1,4 +1,4 @@
-import { CHANNELS, type Channel, type Project, type ProjectChannel, isChannel, validateProject, validId, validPackage } from './model.js';
+import { CHANNELS, type Channel, type Project, type ProjectChannel, isChannel, validateProject, validClientId, validId, validPackage } from './model.js';
 
 export const channelNames: Record<Channel, string> = {
   huawei: '华为', honor: '荣耀', xiaomi: '小米', oppo: 'OPPO', vivo: 'vivo', tencent: '应用宝',
@@ -41,7 +41,7 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     } while (!validPackage(packageName));
   }
   const rows: ProjectChannel[] = [];
-  io.write('\n账号备注由你命名，用来区分本机保存的发布账号；同一渠道账号请始终使用同一备注。只有一个账号时直接回车。\n');
+  io.write('\n账号备注由你命名，用来区分本机保存的渠道账号；同一渠道账号请始终使用同一备注。只有一个账号时直接回车。\n');
   for (const channel of selection) {
     const saved = previous?.channels.find(row => row.channel === channel);
     io.write(`\n${channelNames[channel]}（${channel}）\n`);
@@ -63,7 +63,15 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
       vivo: 'vivo access_key（API 接入标识，与 access_secret 配对；从后台复制）',
       tencent: '应用宝 uid（主开发者账号的用户 ID，不是应用 AppID）',
     };
-    if (labels[channel]) row.client_id = await required(labels[channel]!, saved?.client_id);
+    if (labels[channel]) {
+      if (channel === 'xiaomi') {
+        for (;;) {
+          const value = await ask(labels[channel]!, saved?.client_id);
+          if (validClientId(channel, value)) { row.client_id = value; break; }
+          io.write('请填写小米开发者账号（userName），最多 256 字节，不含控制字符。\n');
+        }
+      } else row.client_id = await required(labels[channel]!, saved?.client_id);
+    }
     if (saved?.language_id) row.language_id = saved.language_id;
     if (channel === 'huawei' || channel === 'honor') io.write(saved?.language_id
       ? `保留已有更新说明语言设置：${saved.language_id}。\n` : '更新说明使用后台已有的简体中文条目，预检时自动查找。\n');

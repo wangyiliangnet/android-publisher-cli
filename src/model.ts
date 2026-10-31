@@ -103,6 +103,9 @@ export const validHash = (s: unknown): s is string => typeof s === 'string' && /
 export const validPackage = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(s) && s.length <= 255;
 export const validVersion = (s: unknown): s is string => typeof s === 'string' && /^[1-9][0-9]{0,18}$/.test(s) && BigInt(s) <= 9223372036854775807n;
 export const validText = (s: unknown, max: number): s is string => typeof s === 'string' && Buffer.byteLength(s) <= max && !/[\u0000-\u001f\u007f\u2028\u2029]/u.test(s);
+export const validClientId = (channel: Channel, value: unknown): value is string => channel === 'xiaomi'
+  ? validText(value, 256) && value.length > 0 && value.trim() === value
+  : validId(value);
 export const validAbsolute = (s: unknown): s is string => typeof s === 'string' && s.length <= 4096 && path.isAbsolute(s) && path.normalize(s) === s && validText(s, 4096);
 export const isChannel = (s: unknown): s is Channel => typeof s === 'string' && CHANNELS.includes(s as Channel);
 
@@ -178,9 +181,10 @@ export function validateProject(value: unknown): Project {
   const seen = new Set<string>();
   for (const row of value.channels) {
     assertObject(row, ['channel', 'account', 'app_id'], ['client_id', 'language_id', 'icon_path', 'privacy_url']);
-    if (!isChannel(row.channel) || seen.has(row.channel) || !validId(row.account) || !validId(row.app_id)) throw new Error('invalid or duplicate channel');
+    if (!isChannel(row.channel) || seen.has(row.channel) || !validId(row.account) ||
+      !(validId(row.app_id) || ['xiaomi', 'oppo', 'vivo'].includes(row.channel) && validPackage(row.app_id))) throw new Error('invalid or duplicate channel');
     seen.add(row.channel);
-    if (row.client_id !== undefined && !validId(row.client_id)) throw new Error('invalid client_id');
+    if (row.client_id !== undefined && !validClientId(row.channel, row.client_id)) throw new Error('invalid client_id');
     if (row.language_id !== undefined && (!validText(row.language_id, 32) || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(row.language_id))) throw new Error('invalid language_id');
     if (row.icon_path !== undefined && !validAbsolute(row.icon_path)) throw new Error('invalid icon_path');
     if (row.privacy_url !== undefined) {
