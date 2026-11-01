@@ -106,7 +106,7 @@ function needsResultRefresh(release){if(!release?.has_writes&&!release?.recovery
 async function refreshCachedRelease(id){const result=await api('releases.get',{release_id:id,refresh:false});rememberRelease(result.release);if(state.view==='release'&&state.release?.batch_id===id||state.view==='app'&&overview(state.app?.project_id).latest_release?.batch_id===id)render();return result.release;}
 
 function renderApps(){
-  let html=heading('应用','选择应用，发新版本、看发布结果，或处理没完成的渠道。',link(icon('plus')+' 添加应用','#/setup/new','primary'))+notice()+taskBanner();
+  let html=heading('应用','选择应用，发布新版本或查看发布记录。',link(icon('plus')+' 添加应用','#/setup/new','primary'))+notice()+taskBanner();
   if(state.newAppDraft)html+='<div class="notice"><strong>有一份尚未完成的应用资料。</strong> '+link('继续填写','#/setup/new','small')+'</div>';
   if(!state.apps.length)return html+empty('先添加要发布的应用','填写应用名称和 Android 包名即可保存，之后为应用添加发布渠道。',link('添加应用','#/setup/new','primary'));
   html+='<div class="cards">';
