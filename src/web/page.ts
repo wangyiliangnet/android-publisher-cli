@@ -6,7 +6,7 @@ export function page(token: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="publisher-token" content="` + token + `">
   <meta name="color-scheme" content="light">
-  <title>应用发布 · 本机</title>
+  <title>应用发布</title>
   <link rel="stylesheet" href="/app.css">
   <script defer src="/app.js"></script>
 </head>
@@ -19,15 +19,14 @@ export function page(token: string): string {
     </a>
     <span class="header-slash">/</span>
     <span class="header-label">应用发布</span>
-    <span class="local-status"><span></span> 本机运行</span>
   </header>
   <div class="workspace">
     <aside class="sidebar" aria-label="主导航">
       <div class="workspace-label">应用</div>
       <nav id="navigation"></nav>
-      <div class="sidebar-bottom"><span class="tiny-dot"></span> 草稿自动保存在本机<br><span class="muted">CLI 与 Web 共用发布结果</span></div>
+      <div class="sidebar-bottom"><span class="tiny-dot"></span> 草稿自动保存</div>
     </aside>
-    <main id="main" tabindex="-1"><div class="loading-state"><span class="spinner"></span> 正在读取本机应用…</div></main>
+    <main id="main" tabindex="-1"><div class="loading-state"><span class="spinner"></span> 正在读取应用…</div></main>
   </div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
   <div id="modal"></div>

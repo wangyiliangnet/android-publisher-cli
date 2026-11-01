@@ -48,7 +48,7 @@ test('Web credential entry preserves multiline materials and clears every comple
   page.on('console', message => logs.push(message.text()));
   page.on('request', request => { if (request.url().endsWith('/api/upload')) uploads++; });
   const row = channel => page.locator('tr').filter({ has: page.getByText(channel + '-main', { exact: true }) });
-  const open = async channel => { await row(channel).getByRole('button', { name: /^(接入凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
+  const open = async channel => { await row(channel).getByRole('button', { name: /^(填写凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
   const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新凭据', exact: true }).waitFor(); };
   const empty = handle => handle.evaluate(form => [...form.querySelectorAll('input,textarea')].every(control => control.value === ''));
   const noPersistence = async marker => {
@@ -146,12 +146,12 @@ test('Web credential entry preserves multiline materials and clears every comple
   await page.locator('#credential-client_secret').fill('synthetic-navigation-F9');
   const navigated = await page.locator('#credentials-form').elementHandle();
   await page.evaluate(() => { location.hash = '#/doctor'; });
-  await page.getByRole('heading', { name: '本机检查', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '环境检查', exact: true }).waitFor();
   assert.equal(await empty(navigated), true); await navigated.dispose();
   await page.getByText('版本与运行信息', { exact: true }).click();
   await page.getByText('0.0.0-test', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '安装或修复检查组件', exact: false }).click();
-  await page.getByText('本机检查通过，可以检查安装包。').waitFor();
+  await page.getByRole('button', { name: '修复', exact: true }).click();
+  await page.getByText('环境检查通过。', { exact: true }).waitFor();
   assert.equal(repairs, 1);
 
   await page.goto(web.url + '/#/accounts'); await open('honor');
@@ -169,10 +169,100 @@ test('Web credential entry preserves multiline materials and clears every comple
   await page.getByRole('button', { name: '验证并保存', exact: true }).click(); await saved('honor');
   await open('honor'); assert.equal(await page.locator('#credential-client_secret').inputValue(), '');
   await page.keyboard.press('Escape');
+  await page.route('**/api/action', async route => {
+    if (route.request().postDataJSON()?.action === 'accounts.update') await route.abort();
+    else await route.continue();
+  });
+  await open('honor');
+  await page.locator('#credential-client_secret').fill('synthetic-disconnected-secret');
+  await page.getByRole('button', { name: '验证并保存', exact: true }).click();
+  await page.locator('#credential-error').getByText(/无法连接发布工具/).waitFor();
+  assert.equal(await page.locator('#credential-client_secret').inputValue(), '');
+  await noPersistence('synthetic-disconnected-secret');
+  await page.unroute('**/api/action');
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 390, height: 844 }); await open('xiaomi');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.keyboard.press('Escape');
   for (const channel of ['oppo', 'vivo', 'tencent']) { await open(channel); assert.equal(await page.locator('#credentials-form input[data-credential-secret]').getAttribute('type'), 'password'); await page.keyboard.press('Escape'); }
   assert.equal(uploads, 0);
+  assert.deepEqual(errors, []);
+});
+
+test('Web environment checks put repair beside the affected function and separate unsupported systems from repairable failures', {
+  skip: process.env.PUBLISHER_BROWSER_TESTS !== '1' ? 'set PUBLISHER_BROWSER_TESTS=1 with Playwright available' : false,
+  timeout: 60000,
+}, async t => {
+  const { chromium } = await import(process.env.PUBLISHER_PLAYWRIGHT_MODULE || 'playwright');
+  const diagnostic = (state = 'missing') => ({ ready: ['ready', 'credentials'].includes(state), version: '0.0.0-test', runtime: process.version, platform: 'darwin', arch: 'arm64',
+    checks: [
+      { id: 'platform', name: 'Apple Silicon Mac', status: state === 'unsupported' ? 'failed' : 'ok' },
+      { id: 'apk_checker', name: '工具自带的 APK 校验组件', status: ['ready', 'credentials'].includes(state) ? 'ok' : 'missing' },
+      { id: 'credentials', name: 'macOS 钥匙串', status: state === 'credentials' ? 'failed' : 'ok' },
+    ] });
+  let current = diagnostic(), repairs = 0, failRepair = true, releaseRepair;
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-environment-browser-'));
+  const web = await startWebServer({ async invoke(action) {
+    if (action === 'apps.list') return { apps: [] };
+    if (action === 'accounts.list') return { accounts: [] };
+    if (action === 'doctor') return current;
+    if (action === 'doctor.repair') {
+      repairs++;
+      if (failRepair) { await new Promise(resolve => { releaseRepair = resolve; }); throw new Error('synthetic repair failure'); }
+      current = diagnostic('ready'); return current;
+    }
+    throw new Error('unexpected synthetic action');
+  } }, { root });
+  let browser;
+  t.after(async () => { releaseRepair?.(); await browser?.close(); await web.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  browser = await chromium.launch({ headless: true, ...(process.env.PUBLISHER_BROWSER_CHANNEL ? { channel: process.env.PUBLISHER_BROWSER_CHANNEL } : {}) });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }), errors = [];
+  page.setDefaultTimeout(10000); page.on('pageerror', error => errors.push(error.message));
+  const screenshot = async name => {
+    if (process.env.PUBLISHER_BROWSER_SCREENSHOTS) {
+      fs.mkdirSync(process.env.PUBLISHER_BROWSER_SCREENSHOTS, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.PUBLISHER_BROWSER_SCREENSHOTS, name + '.png') });
+    }
+  };
+  await page.goto(web.url + '/#/doctor');
+  const apk = page.locator('.check-list li').filter({ hasText: '安装包检查' });
+  await apk.getByRole('button', { name: '修复', exact: true }).waitFor();
+  assert.equal(await page.locator('.page-actions').getByRole('button', { name: /修复/ }).count(), 0);
+  assert.doesNotMatch(await page.locator('#main').innerText(), /组件|SDK|JDK/);
+  await screenshot('environment-needs-repair');
+  await apk.getByRole('button', { name: '修复', exact: true }).click();
+  await apk.getByRole('button', { name: '正在修复…', exact: true }).waitFor();
+  assert.equal(await apk.getByRole('button', { name: '正在修复…', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '重新检查', exact: true }).isDisabled(), true);
+  await apk.getByRole('button', { name: '正在修复…', exact: true }).evaluate(button => button.click());
+  while (!releaseRepair) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(repairs, 1);
+  releaseRepair();
+  await page.getByRole('alert').filter({ hasText: '修复未完成' }).waitFor();
+  await apk.getByRole('button', { name: '修复', exact: true }).waitFor();
+  failRepair = false;
+  await apk.getByRole('button', { name: '修复', exact: true }).click();
+  await page.getByText('环境检查通过。', { exact: true }).waitFor();
+  assert.equal(repairs, 2);
+  assert.equal(await page.locator('.notice.error').count(), 0);
+  assert.equal(await page.getByRole('button', { name: /修复/ }).count(), 0);
+  await screenshot('environment-ready');
+
+  current = diagnostic('unsupported');
+  await page.getByRole('button', { name: '重新检查', exact: true }).click();
+  await page.getByText('当前版本支持使用 Apple 芯片的 Mac。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /修复/ }).count(), 0);
+  current = diagnostic('credentials');
+  await page.getByRole('button', { name: '重新检查', exact: true }).click();
+  await page.locator('.check-list li').filter({ hasText: '账号凭据保存' }).getByText('不可用', { exact: true }).waitFor();
+  assert.equal(await page.getByText('环境检查通过。', { exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: /修复/ }).count(), 0);
+
+  current = diagnostic();
+  await page.getByRole('button', { name: '重新检查', exact: true }).click();
+  await apk.getByRole('button', { name: '修复', exact: true }).waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await screenshot('environment-needs-repair-mobile');
   assert.deepEqual(errors, []);
 });

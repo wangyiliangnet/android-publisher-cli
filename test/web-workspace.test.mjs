@@ -13,6 +13,10 @@ test('incomplete forms and explicit APK mappings survive workspace restart witho
     channels: [{ channel: 'huawei', account: '', app_id: '123' }] };
   const release = { app_id: 'example', channels: ['huawei'], apks: { huawei: '/private/synthetic/one.apk' }, release_notes: '本次更新\n第二行' };
   workspace.save('app', 'new-app', app); workspace.save('release', 'example', release);
+  workspace.save('app-details', 'example', { ...app, display_name: '另一个名称', channels: [] });
+  assert.deepEqual(workspace.get('app', 'new-app'), app);
+  assert.equal(workspace.get('app-details', 'example').display_name, '另一个名称');
+  assert.throws(() => workspace.save('app-details', 'example', { ...app, credentials: 'synthetic' }));
   const restarted = new WebWorkspace(root);
   assert.deepEqual(restarted.get('app', 'new-app'), app); assert.deepEqual(restarted.get('release', 'example'), release);
   for (const [kind, id] of [['app', 'new-app'], ['release', 'example']]) {

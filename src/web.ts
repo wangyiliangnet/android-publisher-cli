@@ -18,36 +18,39 @@ export interface WebBackend {
 
 const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list', 'releases.prepare',
   'releases.preflight', 'releases.review', 'releases.submit', 'releases.get', 'releases.manual', 'releases.reconcile',
-  'accounts.list', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols',
+  'accounts.list', 'accounts.save', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols',
   'drafts.get', 'drafts.save', 'drafts.clear', 'jobs.start', 'jobs.get', 'jobs.list']);
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
 const actionErrors: Record<string, string> = {
-  'apps.save': '应用资料未保存。请检查名称、Android 包名和各渠道的商店应用资料。已填写内容保留在本机草稿中。',
-  'apps.check': '渠道访问验证未完成。应用资料已保留，请检查该渠道的账号、商店应用资料或网络后重新验证。',
-  'releases.prepare': '发布材料准备未完成。请检查各渠道 APK 的包名、版本和签名是否一致，更新说明是否符合限制，并查看“本机检查”。',
-  'releases.preflight': '渠道检查未完成。APK 和更新说明已保留，尚未提交。请检查账号访问权限或网络后重新检查。',
-  'releases.review': '提交内容尚不能确认。请处理未通过的渠道检查或提交结果待确认事项，再重新检查。',
-  'releases.submit': '提交未能完成。请先查看本次发布进度，再按各渠道的处理入口操作；商店已接收的结果会保留。',
-  'releases.get': '本次查询未能更新结果。已保存的进度仍保留，请检查网络或渠道账号权限后重新查询。',
+  'apps.save': '应用资料未保存，请重试。',
+  'apps.check': '无法读取商店应用资料。请核对商店应用编号、账号权限或网络，再重新检查。',
+  'releases.prepare': '发布材料检查未通过。请核对安装包和更新说明，再重新检查。',
+  'releases.preflight': '提交前检查未通过。请核对商店应用资料、账号权限或网络，再重新检查。',
+  'releases.review': '暂时无法确认提交。请重新检查所选渠道；若有提交结果待确认，请先核对提交结果。',
+  'releases.submit': '本次提交未完成。请打开发布记录，查看各渠道状态和下一步操作。',
+  'releases.get': '查询失败，保留上次结果。请检查网络或账号权限后重新查询。',
   'releases.manual': '人工核对记录未保存。请检查渠道、核对来源和核对时间，再重新保存。',
-  'releases.reconcile': '提交结果检查未完成。原请求记录已保留，请检查网络或渠道账号权限后重新检查。',
-  'accounts.forget': '本机凭据清除未完成。请解锁钥匙串后重试，原发布记录和请求回执仍保留。',
-  'accounts.update': '凭据更新未完成。请核对材料、账号权限、网络与钥匙串状态，并查看当前账号状态；存在未决令牌请求时，须先核对原请求。',
-  'doctor.repair': '检查组件安装或修复未完成。请检查网络和本机目录权限后重试。',
-  'drafts.get': '本机草稿未能读取。请保留现有资料，检查本机目录权限。',
-  'drafts.save': '草稿尚未保存。请保留当前页面，检查本机目录权限后重试。',
-  'drafts.clear': '本机草稿未能清除。已提交的发布记录仍保留。',
+  'releases.reconcile': '无法确认提交结果。请保留发布记录，检查网络或账号权限后再次核对。',
+  'accounts.forget': '凭据未清除。请解锁 macOS 钥匙串后重试。',
+  'accounts.save': '渠道账号未保存。请核对账号备注和 API 接入标识，再重试。',
+  'accounts.update': '凭据未保存。请核对账号权限和网络连接后重新填写。',
+  'doctor.repair': '修复未完成。请检查网络和本地数据目录权限，再点击“修复”重试。',
+  'drafts.get': '草稿无法读取，请重新打开页面重试。',
+  'drafts.save': '草稿未保存，请点击“重试保存”。',
+  'drafts.clear': '草稿未能删除，请重试。',
   'jobs.start': '操作未能开始。请先查看当前任务，再重试。',
   'jobs.get': '未找到此操作。请返回应用查看已保存的发布进度。',
 };
 
 function safeActionError(action: string, error: unknown): string {
-  if (action === 'apps.save' && error instanceof Error) {
-    if (error.message === '此 API 账号已接入，请选择已有渠道账号。') return '此 API 账号已接入，请在“渠道账号”中选择已有账号，沿用同一标识。';
-    if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个渠道账号已关联原 API 客户端。要使用另一个客户端，请选择“接入新的渠道账号”。';
+  if (['apps.save', 'accounts.save'].includes(action) && error instanceof Error) {
+    if (error.message === '此 API 账号已接入，请选择已有渠道账号。') return '这个 API 账号已保存。请使用已有渠道账号，无需重复添加。';
+    if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个渠道账号已关联原 API 客户端。要使用另一个客户端，请选择“新增渠道账号”。';
   }
   if (action === 'releases.prepare' && error instanceof Error) {
+    if (/^(APK 检查组件|检查组件|自带运行时|另一个进程正在安装)/.test(error.message)) return '安装包检查不可用。请打开“环境检查”，点击“修复”后重试。';
+    if (error.message === '应用尚未配置发布渠道，请先添加发布渠道') return error.message;
     if (error.message === 'all APKs must have the same package, version and signer') return '各渠道 APK 的包名、版本或签名不一致。请在“准备材料”中更换安装包后重新检查。';
     if (error.message === 'APK 包名与应用配置不一致') return 'APK 的 Android 包名与此应用不符。请确认应用选择和各渠道安装包。';
     if (error.message === 'debuggable APK cannot be published') return '选择的 APK 是调试包。请使用已签名的正式发布安装包。';
@@ -55,7 +58,7 @@ function safeActionError(action: string, error: unknown): string {
     if (/更新说明最多 (200|500) 个字符/.test(error.message)) return '更新说明超出所选渠道的长度限制。vivo 最多 200 个字符，其他渠道最多 500 个字符。请缩短后重新检查。';
     if (/^(xiaomi|oppo|vivo): configured app ID differs from APK package$/.test(error.message)) return '所选 APK 的 Android 包名与应用资料不符。请确认应用选择和各渠道安装包。';
   }
-  return actionErrors[action] ?? '操作未完成。请查看应用当前状态和处理入口后重试。';
+  return actionErrors[action] ?? '操作未完成。请返回应用查看已保存的资料和发布进度，再重试。';
 }
 
 function safeResult(value: unknown, action: string): unknown {
@@ -189,7 +192,7 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
     headers(response);
     let activeAction = '';
     void (async () => {
-      if (request.headers.host !== expectedHost) throw new RequestError(403, '仅允许从本机页面访问。');
+      if (request.headers.host !== expectedHost) throw new RequestError(403, '请通过服务启动时显示的本地地址访问。');
       if (request.headers['sec-fetch-site'] === 'cross-site') throw new RequestError(403, '不允许跨站访问。');
       const requested = new URL(request.url ?? '/', origin);
       if (request.method === 'GET') {

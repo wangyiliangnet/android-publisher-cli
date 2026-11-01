@@ -334,7 +334,7 @@ export class Store {
     const issues: RecoveryIssue[] = [];
     if (token && ['intent', 'unknown'].includes(token.effect)) issues.push({ kind: 'account_token', effect: token.effect,
       recorded_at: token.updated_at, message: '账号令牌申请结果未确定，已阻止再次申请；当前无法自动核对。',
-      next_action: '在渠道后台核对 API 账号，并联系维护者检查令牌记录。保留本机状态和账号备注。' });
+      next_action: '在渠道后台核对 API 账号，并联系维护者检查令牌记录。保留本地状态和账号备注。' });
     const pending = rows<OperationRow>(this.db,
       "SELECT * FROM operations WHERE scope=? AND effect IN ('intent','unknown') ORDER BY started_at,attempt", target.scope);
     for (const op of pending) issues.push({ kind: 'business_write', effect: op.effect,

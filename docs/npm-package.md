@@ -14,11 +14,11 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 npm pack --dry-run --json
 ```
 
-前两步安装锁定依赖并完成类型检查、构建和测试。最后一条命令只列出将打包的文件，不生成压缩包。清单应包含 `build/`、`docs/`、`README.md`、`GLOSSARY.md`、许可证和 `package.json`，不含密钥、APK、状态库、私钥或个人本机路径。npm 包没有安装脚本。
+前两步安装锁定依赖并完成类型检查、构建和测试。最后一条命令只列出将打包的文件，不生成压缩包。清单应包含 `build/`、`docs/`、`README.md`、`GLOSSARY.md`、许可证和 `package.json`，不得包含密钥、APK、状态库、私钥或含个人信息的文件路径。npm 包没有安装脚本。
 
 ## 安装实际压缩包
 
-下面在 `dist/` 生成压缩包并计算文件校验值，再安装到临时目录，避免覆盖本机正在使用的 CLI：
+下面在 `dist/` 生成压缩包并计算文件校验值，再安装到临时目录，避免覆盖本地正在使用的 CLI：
 
 ```sh
 mkdir -p dist
@@ -34,7 +34,7 @@ npm install --global --prefix "$prefix" --ignore-scripts "./$archive"
 
 校验应显示 `OK`。版本应与压缩包文件名和 `package.json` 一致，帮助应正常列出命令。CI 也会用独立目录安装已检查的压缩包。
 
-已配置 Android 工具时，可再运行 `"$prefix/bin/android-release" doctor`。诊断失败时按提示修复本机环境；脚本解析结果须使用 `doctor --json`。日常发布的检查组件由 `doctor --repair` 或首次 `publish` 自动下载和校验。用户无需配置 Android SDK 或 JDK。构建验收应同时检查 `web --help` 和独立校验器字节码已进入实际包。
+已配置 Android 工具时，可再运行 `"$prefix/bin/android-release" doctor`。诊断失败时按提示修复运行环境；脚本解析结果须使用 `doctor --json`。日常发布的检查组件由 `doctor --repair` 或首次 `publish` 自动下载和校验。用户无需配置 Android SDK 或 JDK。构建验收应同时检查 `web --help` 和独立校验器字节码已进入实际包。
 
 ## 交付与版本约束
 

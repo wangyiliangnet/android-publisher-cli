@@ -32,6 +32,7 @@ function model(initial = 'ready') {
       for (const row of payload.app.channels) { let account = state.accounts.find(item => item.channel === row.channel && item.account === row.account); if (!account) { account = { channel: row.channel, account: row.account, client_id: row.client_id, apps: [], saved: false }; state.accounts.push(account); } if (!account.apps.includes(payload.app.project_id)) account.apps.push(payload.app.project_id); }
       return { app: payload.app };
     }
+    if (action === 'accounts.save') { state.accounts.push({ ...clone(payload.account), apps: [], saved: false }); return { account: payload.account }; }
     if (action === 'accounts.list') return { accounts: state.accounts.map(row => ({ ...row, app_names: row.apps.map(id => state.apps.find(app => app.project_id === id)?.display_name || id) })) };
     if (action === 'accounts.update') { state.credentialInputs.push(clone(payload)); const account = state.accounts.find(row => row.channel === payload.channel && row.account === payload.account); account.saved = true; for (const appId of account.apps) state.connected.add(appId + ':' + account.channel); return { updated: true }; }
     if (action === 'accounts.forget') { state.accounts.find(row => row.channel === payload.channel && row.account === payload.account).saved = false; return { forgotten: true }; }
@@ -39,6 +40,7 @@ function model(initial = 'ready') {
     if (action === 'releases.list') return { releases: state.releases.filter(release => release.project_id === payload.app_id).reverse() };
     if (action === 'releases.prepare') {
       state.prepareInputs.push(clone(payload));
+      if (state.prepareError) { const message = state.prepareError; state.prepareError = null; throw new Error(message); }
       const gate = state.prepareGate; if (gate) await gate;
       if (state.returnExisting) return { release: get(state.returnExisting), duplicate: true };
       const app = state.apps.find(item => item.project_id === payload.app_id);
@@ -86,12 +88,16 @@ test('Web app onboarding keeps Chinese names, interrupted progress, and reusable
   await page.getByRole('link', { name: '添加应用', exact: true }).first().click();
   await page.getByLabel('应用名称', { exact: true }).fill('阅读助手');
   await page.getByLabel('Android 包名', { exact: true }).fill('com.example.reader');
-  await page.getByRole('button', { name: /下一步：选择商店/ }).click();
+  await page.getByRole('button', { name: '创建应用', exact: true }).click();
+  await page.getByRole('heading', { name: '阅读助手', exact: true }).waitFor();
+  assert.deepEqual(state.apps[0].channels, []);
+  assert.equal(state.accounts.length, 1);
+  await page.getByRole('link', { name: '添加发布渠道', exact: true }).first().click();
   await page.locator('[data-setup-select=huawei]').check();
   await page.locator('[data-setup-select=honor]').check();
-  await page.getByRole('button', { name: /下一步：接入渠道账号/ }).click();
+  await page.getByRole('button', { name: /下一步：填写商店资料和账号/ }).click();
   await page.locator('#channel-app_id').fill('10001');
-  await page.getByRole('button', { name: '保存资料并接入华为凭据', exact: true }).click();
+  await page.getByRole('button', { name: '保存并填写账号凭据', exact: true }).click();
   assert.equal(await page.locator('#credential-mode-service_account_json').inputValue(), 'text');
   assert.equal(await page.locator('#credential-text-service_account_json').isVisible(), true);
   await page.locator('#credential-text-service_account_json').fill(JSON.stringify({ key_id: 'synthetic-id', sub_account: 'synthetic-account', private_key: 'synthetic material' }));
@@ -103,8 +109,8 @@ test('Web app onboarding keeps Chinese names, interrupted progress, and reusable
   await page.getByText('荣耀 · 2 / 2', { exact: true }).waitFor();
   await page.locator('#channel-app_id').fill('10002');
   assert.equal(await page.locator('#channel-client_id').inputValue(), 'shared-client');
-  await page.getByRole('button', { name: '验证并接入荣耀', exact: true }).click();
-  await page.getByRole('heading', { name: '所选渠道均已接入', exact: true }).waitFor();
+  await page.getByRole('button', { name: '保存并检查账号访问', exact: true }).click();
+  await page.getByRole('heading', { name: '发布渠道配置完成', exact: true }).waitFor();
   assert.equal(state.credentialInputs.length, 1);
   assert.equal(state.checks.at(-1).channels[0], 'honor');
   await page.getByRole('link', { name: '进入应用', exact: true }).click();
@@ -116,11 +122,12 @@ test('Web app onboarding keeps Chinese names, interrupted progress, and reusable
   assert.deepEqual(errors, []);
 });
 
-test('Web publish drafts survive navigation and recheck changed materials before one background submission', options, async t => {
+test('Web publish drafts survive navigation and recheck materials before one submission with a lost acknowledgement', options, async t => {
   const { state, root, web, page, errors } = await fixture(t);
   await page.goto(web.url);
   await page.getByRole('heading', { name: '阅读助手', exact: true }).waitFor();
-  await page.getByRole('button', { name: '发新版本', exact: false }).first().click();
+  assert.equal(await page.getByText('接下来要做', { exact: true }).count(), 0);
+  await page.getByRole('button', { name: '发布新版本', exact: false }).first().click();
   await page.locator('#apk-huawei').setInputFiles({ name: 'different-name-b.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic Huawei APK') });
   await page.locator('#apk-tencent').setInputFiles({ name: 'different-name-a.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic Tencent APK') });
   await page.getByLabel(/更新说明/).fill('第一份版本说明，修复已知问题。');
@@ -131,7 +138,7 @@ test('Web publish drafts survive navigation and recheck changed materials before
   assert.equal(await page.getByLabel(/更新说明/).inputValue(), '第一份版本说明，修复已知问题。');
   await page.getByRole('link', { name: '渠道账号', exact: true }).click();
   await page.getByRole('link', { name: '阅读助手', exact: true }).first().click();
-  await page.getByRole('link', { name: '继续这份草稿', exact: true }).click();
+  await page.getByRole('link', { name: '继续编辑草稿', exact: true }).click();
   assert.equal(await page.getByLabel(/更新说明/).inputValue(), '第一份版本说明，修复已知问题。');
   await page.getByRole('button', { name: /检查材料并核对提交内容/ }).click();
   await page.getByRole('button', { name: '确认上传并提交审核', exact: true }).waitFor();
@@ -145,12 +152,22 @@ test('Web publish drafts survive navigation and recheck changed materials before
   assert.notEqual(state.prepareInputs[1].apks.huawei, state.prepareInputs[1].apks.tencent);
   let releaseSubmit;
   state.submitGate = new Promise(resolve => { releaseSubmit = resolve; state.releaseSubmit = resolve; });
+  await page.route('**/api/action', async route => {
+    const request = route.request().postDataJSON();
+    if (request?.action === 'jobs.start' && request.payload?.action === 'releases.submit') {
+      const accepted = await route.fetch();
+      assert.equal(accepted.status(), 202);
+      await route.abort();
+    } else await route.continue();
+  });
   await page.getByRole('button', { name: '确认上传并提交审核', exact: true }).click();
-  await page.getByRole('link', { name: '看实时处理进度', exact: true }).waitFor();
+  await page.getByRole('alert').filter({ hasText: '暂时无法确认提交是否已开始' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '返回修改材料', exact: true }).count(), 0);
+  await page.getByRole('link', { name: '查看提交进度', exact: true }).waitFor();
   await page.getByRole('link', { name: '渠道账号', exact: true }).click();
   assert.equal(state.submitInputs.length, 1);
   await page.getByRole('link', { name: '阅读助手', exact: true }).first().click();
-  await page.getByRole('link', { name: '看处理进度', exact: true }).first().click();
+  await page.getByRole('link', { name: '查看提交进度', exact: true }).first().click();
   await page.reload();
   await page.getByRole('heading', { name: /正在向商店提交/ }).waitFor();
   assert.equal(await page.getByText('结果待确认', { exact: true }).count(), 0);
@@ -159,7 +176,78 @@ test('Web publish drafts survive navigation and recheck changed materials before
   await page.getByRole('link', { name: '返回应用', exact: true }).click();
   assert.equal(fs.existsSync(path.join(root, 'web-drafts', 'release', 'reader.json')), false);
   assert.equal(state.submitInputs.length, 1);
-  await page.getByText(/未提交的准备记录/).waitFor();
+  await page.getByText(/材料检查记录/).waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test('Web retries a failed draft save without losing inputs and explains connection and response failures', options, async t => {
+  const { state, root, web, page, errors } = await fixture(t);
+  await page.goto(web.url + '/#/publish/reader');
+  await page.getByLabel(/更新说明/).waitFor();
+  let failSave = true;
+  await page.route('**/api/action', async route => {
+    if (failSave && route.request().postDataJSON()?.action === 'drafts.save') {
+      await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: '草稿未保存，请点击“重试保存”。' }) });
+    } else await route.continue();
+  });
+  await page.getByLabel(/更新说明/).fill('保存失败后仍应保留的更新说明。');
+  await page.getByRole('button', { name: '重试保存', exact: true }).waitFor();
+  assert.equal(await page.getByLabel(/更新说明/).inputValue(), '保存失败后仍应保留的更新说明。');
+  await page.getByRole('button', { name: '重试保存', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '草稿未保存' }).waitFor();
+  failSave = false;
+  await page.getByRole('button', { name: '重试保存', exact: true }).click();
+  await page.getByText('草稿已保存', { exact: true }).waitFor();
+  assert.equal(await page.locator('.notice.error').count(), 0);
+  const draft = JSON.parse(fs.readFileSync(path.join(root, 'web-drafts', 'release', 'reader.json'), 'utf8'));
+  assert.equal(draft.release_notes, '保存失败后仍应保留的更新说明。');
+
+  await page.route('**/api/upload', route => route.abort());
+  await page.locator('#apk-huawei').setInputFiles({ name: 'offline.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic APK') });
+  await page.getByRole('alert').filter({ hasText: '无法连接发布工具。请确认工具仍在运行，再重试。' }).waitFor();
+  assert.equal(await page.getByLabel(/更新说明/).inputValue(), draft.release_notes);
+  await page.unroute('**/api/upload');
+  await page.route('**/api/upload', route => route.fulfill({ status: 200, contentType: 'application/json', body: 'null' }));
+  await page.locator('#apk-huawei').setInputFiles({ name: 'invalid-response.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic APK') });
+  await page.getByRole('alert').filter({ hasText: '无法读取操作结果，请刷新页面重试。' }).waitFor();
+  await page.locator('#notes-file').setInputFiles({ name: 'invalid-notes.txt', mimeType: 'text/plain', buffer: Buffer.from([0xff, 0xfe]) });
+  await page.getByRole('alert').filter({ hasText: '无法读取更新说明，请选择 UTF-8 编码的文本文件。' }).waitFor();
+  assert.equal(await page.getByLabel(/更新说明/).inputValue(), draft.release_notes);
+  await page.unroute('**/api/upload');
+  await page.locator('#apk-huawei').setInputFiles({ name: 'recovered.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic recovered APK') });
+  await page.getByText('recovered.apk', { exact: true }).waitFor();
+  assert.equal(await page.locator('.notice.error').count(), 0);
+  assert.equal(state.submitInputs.length, 0);
+  assert.deepEqual(errors, []);
+});
+
+test('Web rechecks the current draft after replacing an APK and failing preparation', options, async t => {
+  const { state, web, page, errors } = await fixture(t);
+  await page.goto(web.url + '/#/publish/reader');
+  await page.locator('#apk-huawei').setInputFiles({ name: 'first.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('first synthetic APK') });
+  await page.locator('#apk-tencent').setInputFiles({ name: 'tencent.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('synthetic Tencent APK') });
+  await page.getByLabel(/更新说明/).fill('第一次检查的更新说明。');
+  await page.waitForFunction(() => Object.keys(state.publish.uploading).length === 0);
+  await page.getByRole('button', { name: /检查材料并核对提交内容/ }).click();
+  await page.getByRole('button', { name: '确认上传并提交审核', exact: true }).waitFor();
+  const first = state.releases[0].batch_id;
+  await page.getByRole('button', { name: '返回修改材料', exact: true }).click();
+  await page.locator('#apk-huawei').setInputFiles({ name: 'replacement.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('replacement synthetic APK') });
+  await page.getByLabel(/更新说明/).fill('更换安装包后的更新说明。');
+  await page.waitForFunction(() => Object.keys(state.publish.uploading).length === 0);
+  state.prepareError = 'APK 检查组件不可用，请运行 android-release doctor --repair';
+  await page.getByRole('button', { name: /检查材料并核对提交内容/ }).click();
+  await page.getByRole('link', { name: '打开环境检查', exact: true }).waitFor();
+  assert.equal(await page.locator('.notice.error').count(), 1);
+  assert.doesNotMatch(await page.locator('.notice.error').textContent(), /组件|doctor --repair/);
+  await page.getByRole('button', { name: '重新检查所选渠道', exact: true }).click();
+  await page.getByRole('button', { name: '确认上传并提交审核', exact: true }).waitFor();
+  assert.equal(state.prepareInputs.length, 3);
+  assert.equal(state.prepareInputs[2].release_notes, '更换安装包后的更新说明。');
+  assert.notEqual(state.prepareInputs[2].apks.huawei, state.prepareInputs[0].apks.huawei);
+  assert.notEqual(state.preflightInputs.at(-1).release_id, first);
+  assert.match(await page.locator('tbody tr').first().textContent(), /replacement\.apk/);
+  assert.equal(state.submitInputs.length, 0);
   assert.deepEqual(errors, []);
 });
 
@@ -175,7 +263,7 @@ test('Web does not attach an older check to a new empty draft of the same applic
   await page.waitForFunction(() => Object.keys(state.publish.uploading).length === 0);
   await page.getByRole('button', { name: /检查材料并核对提交内容/ }).click();
   await page.getByRole('link', { name: '阅读助手', exact: true }).first().click();
-  await page.getByRole('button', { name: /发新版本/, exact: false }).click();
+  await page.getByRole('button', { name: /发布新版本/, exact: false }).click();
   await page.getByRole('button', { name: '新建空白草稿', exact: true }).click();
   await page.getByLabel(/更新说明/).waitFor();
   const flow = await page.evaluate(() => state.publish.flowId);
@@ -198,11 +286,15 @@ test('Web separates an unknown submission from manual review and keeps unknown m
   summary(release);
   await page.goto(web.url + '/#/release/' + release.batch_id);
   await page.getByRole('heading', { name: /1 个渠道已提交/ }).waitFor();
+  assert.match(await page.locator('.result-lead').textContent(), /自动查询：1 个渠道审核未通过/);
+  const rejectedTask = page.locator('.task-row').filter({ hasText: '华为：审核未通过' });
+  assert.equal(await rejectedTask.getByRole('button', { name: '准备新版本', exact: true }).count(), 1);
+  assert.equal(await rejectedTask.getByRole('button', { name: '人工核对并记录', exact: true }).count(), 0);
   const unknownRow = page.locator('tbody tr').filter({ has: page.getByText('应用宝', { exact: true }) }).first();
-  assert.equal(await unknownRow.getByText('先确认提交结果', { exact: true }).count(), 2);
+  for (const column of [1, 2, 3]) assert.equal(await unknownRow.locator('td').nth(column).getByText('提交结果待确认', { exact: true }).count(), 1);
   assert.equal(await page.getByRole('button', { name: '重试应用宝', exact: true }).count(), 0);
   await unknownRow.getByRole('button', { name: '人工核对并记录', exact: true }).click();
-  await page.getByText(/人工核对记录不会解除提交结果待确认/).waitFor();
+  await page.getByText(/人工核对记录不会解除此限制/).waitFor();
   await page.getByLabel('核对的审核状态').selectOption('approved');
   await page.getByLabel('核对的上架状态').selectOption('live');
   await page.getByRole('button', { name: '保存人工核对记录', exact: true }).click();
@@ -210,8 +302,8 @@ test('Web separates an unknown submission from manual review and keeps unknown m
   assert.equal(release.targets[1].recovery_required, true);
   assert.equal(release.targets[1].execution_phase, 'unknown');
   assert.equal(await page.getByRole('button', { name: '重试应用宝', exact: true }).count(), 0);
-  await page.getByRole('button', { name: '检查提交结果', exact: true }).click();
-  await page.getByText(/仍未找到足够回执/).waitFor();
+  await page.getByRole('button', { name: '核对提交结果', exact: true }).click();
+  await page.getByText(/仍有提交结果待确认/).waitFor();
   release.targets[1].execution_phase = 'submitted'; release.targets[1].recovery_required = false; summary(release);
   await page.reload();
   await page.getByRole('heading', { name: /审核未通过/ }).waitFor();
@@ -232,7 +324,7 @@ test('Web separates an unknown submission from manual review and keeps unknown m
   await page.locator('#manual-review').selectOption('approved');
   await page.locator('#manual-live').selectOption('live');
   await page.getByRole('button', { name: '保存人工核对记录', exact: true }).click();
-  await page.getByText(/上架自动确认 1 \/ 2 个渠道；人工核对记录：1 个渠道已上架/).waitFor();
+  await page.getByText(/自动查询：1 \/ 2 个渠道已上架；人工核对记录：1 个渠道已上架/).waitFor();
   assert.equal(release.live_targets, 1);
   assert.equal(await page.locator('.running-tasks').filter({ hasText: '查询审核与上架结果' }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -251,7 +343,7 @@ test('Web keeps automatic tracking and query health separate from manually recor
   }
   summary(release);
   await page.goto(web.url + '/#/release/' + release.batch_id);
-  await page.getByText(/上架自动确认 0 \/ 2 个渠道；人工核对记录：2 个渠道已上架/).waitFor();
+  await page.getByText(/自动查询：0 \/ 2 个渠道已上架；人工核对记录：2 个渠道已上架/).waitFor();
   assert.equal(await page.locator('.result-lead.success').count(), 0);
   await page.waitForFunction(() => state.jobs.some(job => job.action === 'releases.get' && job.status === 'succeeded'));
   assert.ok(state.refreshInputs.length > 0);
@@ -262,7 +354,7 @@ test('Web keeps automatic tracking and query health separate from manually recor
   const previousTime = await huawei.locator('td').nth(4).textContent();
   release.targets[0].review_state = 'approved'; release.targets[0].availability_state = 'live'; summary(release);
   await page.getByRole('button', { name: '重新查询结果', exact: true }).first().click();
-  await page.getByText(/上架自动确认 1 \/ 2 个渠道；人工核对记录：2 个渠道已上架/).waitFor();
+  await page.getByText(/自动查询：1 \/ 2 个渠道已上架；人工核对记录：2 个渠道已上架/).waitFor();
   assert.equal(release.live_targets, 1);
   assert.equal(await huawei.locator('td').nth(3).getByText('已上架', { exact: true }).count(), 1);
   state.queryOffline = true;
@@ -308,7 +400,7 @@ test('Web requires a selected channel and distinguishes preflight success from s
   await page.getByLabel(/更新说明/).fill('先核对需要提交的渠道。');
   await page.waitForFunction(() => Object.keys(state.publish.uploading).length === 0);
   await page.getByRole('button', { name: /检查材料并核对提交内容/ }).click();
-  await page.getByText('预检通过', { exact: true }).waitFor();
+  await page.getByText('检查通过', { exact: true }).waitFor();
   assert.equal(state.releases[0].targets[1].review_state, 'unknown');
   await page.locator('[data-check-channel=huawei]').uncheck();
   await page.locator('[data-check-channel=tencent]').uncheck();
@@ -356,11 +448,11 @@ test('Web repairs the original account and retries only a failed channel while a
   release.targets[1].execution_phase = 'preflighted'; release.targets[1].execution_attempted = true;
   summary(release);
   await page.goto(web.url + '/#/release/' + release.batch_id);
-  await page.getByRole('button', { name: '修复渠道账号', exact: true }).click();
+  await page.getByRole('button', { name: '更新账号凭据', exact: true }).click();
   await page.getByRole('heading', { name: /应用宝.*更新凭据/ }).waitFor();
   await page.locator('#credential-api_secret').fill('synthetic-repair-secret');
   await page.getByRole('button', { name: '验证并保存', exact: true }).click();
-  await page.getByText(/应用宝渠道账号已验证/).waitFor();
+  await page.getByText(/应用宝凭据已保存/).waitFor();
   await page.getByRole('button', { name: '重试应用宝', exact: true }).click();
   await page.getByRole('button', { name: '确认重试上述渠道', exact: true }).waitFor();
   const confirmationRows = page.locator('tbody tr');
@@ -368,7 +460,7 @@ test('Web repairs the original account and retries only a failed channel while a
   assert.match(await confirmationRows.first().textContent(), /应用宝/);
   assert.equal(state.submitInputs.length, 0);
   await page.getByRole('button', { name: '确认重试上述渠道', exact: true }).click();
-  await page.getByRole('heading', { name: /1 个渠道已提交，1 个提交结果待确认/ }).waitFor();
+  await page.getByRole('heading', { name: /1 个渠道已提交，1 个渠道的提交结果待确认/ }).waitFor();
   assert.equal(state.submitInputs.length, 1);
   assert.equal(state.submitInputs[0].attempt_only, true);
   const plan = state.plans.get(state.submitInputs[0].approval_plan).plan;
@@ -383,20 +475,26 @@ test('Web repairs the original account and retries only a failed channel while a
 test('Web removes a configured channel only after an explicit confirmation and keeps prior release records', options, async t => {
   const { state, backend, web, page, errors } = await fixture(t);
   await backend.invoke('releases.prepare', { app_id: 'reader', channels: ['huawei', 'tencent'], apks: { huawei: '/private/synthetic/h.apk', tencent: '/private/synthetic/t.apk' }, release_notes: '旧记录的材料保持不变。' });
-  await page.goto(web.url + '/#/setup/reader');
+  await page.goto(web.url + '/#/setup/reader?channels=1');
   await page.getByRole('button', { name: '返回选择商店', exact: true }).click();
   await page.getByText('管理已配置的渠道', { exact: true }).click();
-  const dialog = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /只影响以后的发布，已有记录和本机凭据会保留/); await event.accept(); resolve(); }));
+  const dialog = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /只影响以后的发布，已有记录和本地凭据会保留/); await event.accept(); resolve(); }));
   await page.getByRole('button', { name: '移除应用宝渠道', exact: true }).click();
   await dialog;
   await page.getByText('渠道已移除，已有发布记录仍保留。', { exact: true }).waitFor();
   assert.deepEqual(state.apps[0].channels.map(row => row.channel), ['huawei']);
   assert.equal(state.releases[0].targets.length, 2);
   assert.equal(state.accounts.find(row => row.channel === 'tencent').saved, true);
-  await page.getByText('管理已配置的渠道', { exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '移除华为渠道', exact: true }).isVisible(), true);
+  page.once('dialog', event => event.accept());
   await page.getByRole('button', { name: '移除华为渠道', exact: true }).click();
-  await page.getByText('应用至少保留一个渠道，接入其它渠道后再移除。', { exact: true }).waitFor();
-  assert.equal(state.apps[0].channels.length, 1);
+  await page.getByText('渠道已移除，已有发布记录仍保留。', { exact: true }).waitFor();
+  assert.equal(state.apps[0].channels.length, 0);
+  assert.equal(state.releases[0].targets.length, 2);
+  await page.getByRole('link', { name: '返回应用', exact: true }).click();
+  await page.getByRole('heading', { name: '阅读助手', exact: true }).waitFor();
+  await page.getByText('尚未配置发布渠道。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /发布新版本/ }).count(), 0);
   assert.deepEqual(errors, []);
 });
 
@@ -411,7 +509,7 @@ test('Web starts another application explicitly without erasing an application a
   }, { ...state.apps[0], channels: [...state.apps[0].channels, { channel: 'honor', account: 'honor-new', app_id: '', client_id: '' }] });
   await page.goto(web.url + '/#/setup/new');
   await page.getByRole('button', { name: '重新添加另一个应用', exact: true }).waitFor();
-  const confirmed = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /已经保存的应用、渠道和本机凭据会保留/); await event.accept(); resolve(); }));
+  const confirmed = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /已经保存的应用、渠道和本地凭据会保留/); await event.accept(); resolve(); }));
   await page.getByRole('button', { name: '重新添加另一个应用', exact: true }).click();
   await confirmed;
   await page.getByLabel('应用名称', { exact: true }).waitFor();
@@ -428,8 +526,17 @@ test('Web starts another application explicitly without erasing an application a
 test('Web keeps prepared records offline, opens an identical submitted record, and explains changed content before confirmation', options, async t => {
   const { state, backend, summary, web, page, errors } = await fixture(t);
   const { release } = await backend.invoke('releases.prepare', { app_id: 'reader', channels: ['huawei', 'tencent'], apks: { huawei: '/private/synthetic/h.apk', tencent: '/private/synthetic/t.apk' }, release_notes: '与原记录一致的版本说明。' });
+  await page.goto(web.url + '/#/app/reader');
+  await page.getByRole('heading', { name: '还没有发布记录', exact: true }).waitFor();
+  assert.equal(await page.getByText(/最近一次发布/).count(), 0);
+  await page.getByRole('link', { name: '全部应用', exact: false }).click();
+  await page.getByText('还没有开始提交版本', { exact: true }).waitFor();
   await page.goto(web.url + '/#/release/' + release.batch_id);
-  await page.getByRole('heading', { name: '材料已保存，尚未确认提交', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '尚未提交', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '继续准备', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: '重新查询结果', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('columnheader', { name: '审核', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('columnheader', { name: '上架', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '人工核对并记录', exact: true }).count(), 0);
   await page.waitForTimeout(1400);
   assert.equal(state.refreshInputs?.length || 0, 0);
@@ -437,7 +544,7 @@ test('Web keeps prepared records offline, opens an identical submitted record, a
   release.has_writes = true; release.can_edit = false; summary(release);
   state.returnExisting = release.batch_id;
   await page.reload();
-  await page.getByRole('button', { name: '准备另一次发布', exact: true }).click();
+  await page.getByRole('button', { name: '新建发布草稿', exact: true }).click();
   const fillAndCheck = async notes => {
     await page.locator('#apk-huawei').setInputFiles({ name: 'h.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('same synthetic Huawei bytes') });
     await page.locator('#apk-tencent').setInputFiles({ name: 't.apk', mimeType: 'application/octet-stream', buffer: Buffer.from('same synthetic Tencent bytes') });
@@ -446,16 +553,16 @@ test('Web keeps prepared records offline, opens an identical submitted record, a
     await page.getByRole('button', { name: /检查材料并核对提交内容/ }).click();
   };
   await fillAndCheck('与原记录一致的版本说明。');
-  await page.getByText(/材料与已有发布相同，已打开原发布记录/).waitFor();
+  await page.getByText(/这些材料已开始提交，已打开对应的发布记录/).waitFor();
   assert.match(page.url(), new RegExp('/release/' + release.batch_id + '$'));
   assert.equal(await page.getByRole('button', { name: '确认上传并提交审核', exact: true }).count(), 0);
   assert.equal(state.submitInputs.length, 0);
   state.returnExisting = null; state.relatedRelease = release.batch_id;
-  await page.getByRole('button', { name: '准备另一次发布', exact: true }).click();
+  await page.getByRole('button', { name: '新建发布草稿', exact: true }).click();
   await fillAndCheck('这次只修改更新说明，需要重新核对。');
   await page.getByRole('button', { name: '确认上传并提交审核', exact: true }).waitFor();
-  await page.getByText(/安装包与已有发布相同，但更新说明、应用资料或本次渠道已有变化/).waitFor();
-  assert.equal(await page.getByRole('link', { name: '查看原发布', exact: true }).getAttribute('href'), '#/release/' + release.batch_id);
+  await page.getByText(/本次内容与原记录不同/).waitFor();
+  assert.equal(await page.getByRole('link', { name: '查看原记录', exact: true }).getAttribute('href'), '#/release/' + release.batch_id);
   assert.equal(state.submitInputs.length, 0);
   assert.equal(release.release_notes, '与原记录一致的版本说明。');
   assert.deepEqual(errors, []);

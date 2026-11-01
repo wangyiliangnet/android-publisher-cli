@@ -8,6 +8,12 @@ export type Phase = 'prepared' | 'preflighted' | 'submitted' | 'unknown';
 export type Review = 'unknown' | 'in_review' | 'approved' | 'rejected';
 export type Availability = 'unknown' | 'live' | 'not_live';
 
+export interface AccountProfile {
+  channel: Channel;
+  account: string;
+  client_id?: string;
+}
+
 export interface ProjectChannel {
   channel: Channel;
   account: string;
@@ -174,7 +180,7 @@ export const digest = (value: unknown): string => createHash('sha256').update(ty
 
 export function validateProject(value: unknown): Project {
   assertObject(value, ['schema_version', 'project_id', 'channels'], ['display_name', 'package_name', 'signer_sha256']);
-  if (value.schema_version !== 2 || !validId(value.project_id) || !Array.isArray(value.channels) || value.channels.length < 1 || value.channels.length > CHANNELS.length) throw new Error('invalid project identity');
+  if (value.schema_version !== 2 || !validId(value.project_id) || !Array.isArray(value.channels) || value.channels.length > CHANNELS.length) throw new Error('invalid project identity');
   if (value.package_name !== undefined && !validPackage(value.package_name)) throw new Error('invalid saved project identity');
   if (value.display_name !== undefined && (!validText(value.display_name, 256) || !value.display_name.trim())) throw new Error('invalid application display name');
   if (value.signer_sha256 !== undefined && !validHash(value.signer_sha256)) throw new Error('invalid saved project identity');

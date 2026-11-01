@@ -18,8 +18,8 @@ try:
  while time.time()<deadline:
   ready,_,_=select.select([master],[],[],0.1)
   if ready:output+=os.read(master,65536)
-  if '要发布到哪些渠道'.encode() in output:break
- assert '要发布到哪些渠道'.encode() in output,'prompt unavailable'
+  if '应用名称（支持中文）'.encode() in output:break
+ assert '应用名称（支持中文）'.encode() in output,'prompt unavailable'
  # Keep reading like a terminal emulator while the child restores its TTY.
  stop=threading.Event()
  def drain():
