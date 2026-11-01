@@ -23,22 +23,22 @@ const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list'
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
 const actionErrors: Record<string, string> = {
-  'apps.save': '应用资料未保存。请检查名称、Android 包名和各渠道的商店应用资料。已填写内容保留在本地草稿中。',
-  'apps.check': '账号访问检查未通过。应用资料已保留，请检查商店应用资料、账号凭据或网络，再重新检查。',
-  'releases.prepare': '发布材料检查未通过。请核对各渠道 APK 的包名、版本和签名，以及更新说明的长度。若安装包检查不可用，请到“环境检查”中修复。',
-  'releases.preflight': '提交前检查未通过。安装包、更新说明和已完成的提交步骤已保留。请检查商店应用资料、账号凭据或网络后重试。',
-  'releases.review': '暂时无法生成提交内容。请查看检查未通过的原因；若有提交结果待确认，请先核对原请求。',
-  'releases.submit': '本次提交未完成。请查看发布记录中的各渠道进度和下一步操作，已完成的提交步骤会保留。',
-  'releases.get': '本次查询未能更新结果。已保存的进度仍保留，请检查网络或渠道账号权限后重新查询。',
+  'apps.save': '应用资料未保存，请重试。',
+  'apps.check': '无法读取商店应用资料。请核对商店应用编号、账号权限或网络，再重新检查。',
+  'releases.prepare': '发布材料检查未通过。请核对安装包和更新说明，再重新检查。',
+  'releases.preflight': '提交前检查未通过。请核对商店应用资料、账号权限或网络，再重新检查。',
+  'releases.review': '暂时无法确认提交。请重新检查所选渠道；若有提交结果待确认，请先核对提交结果。',
+  'releases.submit': '本次提交未完成。请打开发布记录，查看各渠道状态和下一步操作。',
+  'releases.get': '查询失败，保留上次结果。请检查网络或账号权限后重新查询。',
   'releases.manual': '人工核对记录未保存。请检查渠道、核对来源和核对时间，再重新保存。',
-  'releases.reconcile': '原请求结果未能确认。请保留原记录，检查网络或账号权限后再次核对。',
-  'accounts.forget': '本地凭据清除未完成。请解锁钥匙串后重试，原发布记录和请求回执仍保留。',
-  'accounts.save': '渠道账号未保存。请检查渠道、账号备注和 API 接入标识，并核对是否已有同一账号。',
-  'accounts.update': '凭据未保存。请检查凭据内容、账号权限、网络和 macOS 钥匙串。若之前的账号授权请求结果待确认，请先保留记录并核查原请求。',
+  'releases.reconcile': '无法确认提交结果。请保留发布记录，检查网络或账号权限后再次核对。',
+  'accounts.forget': '凭据未清除。请解锁 macOS 钥匙串后重试。',
+  'accounts.save': '渠道账号未保存。请核对账号备注和 API 接入标识，再重试。',
+  'accounts.update': '凭据未保存。请核对账号权限和网络连接后重新填写。',
   'doctor.repair': '修复未完成。请检查网络和本地数据目录权限，再点击“修复”重试。',
-  'drafts.get': '本地草稿未能读取。请保留现有资料，检查本地目录权限。',
-  'drafts.save': '草稿尚未保存。请保留当前页面，检查本地目录权限后重试。',
-  'drafts.clear': '本地草稿未能清除。已提交的发布记录仍保留。',
+  'drafts.get': '草稿无法读取，请重新打开页面重试。',
+  'drafts.save': '草稿未保存，请点击“重试保存”。',
+  'drafts.clear': '草稿未能删除，请重试。',
   'jobs.start': '操作未能开始。请先查看当前任务，再重试。',
   'jobs.get': '未找到此操作。请返回应用查看已保存的发布进度。',
 };
@@ -49,6 +49,7 @@ function safeActionError(action: string, error: unknown): string {
     if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个渠道账号已关联原 API 客户端。要使用另一个客户端，请选择“新增渠道账号”。';
   }
   if (action === 'releases.prepare' && error instanceof Error) {
+    if (/^(APK 检查组件|检查组件|自带运行时|另一个进程正在安装)/.test(error.message)) return '安装包检查不可用。请打开“环境检查”，点击“修复”后重试。';
     if (error.message === '应用尚未配置发布渠道，请先添加发布渠道') return error.message;
     if (error.message === 'all APKs must have the same package, version and signer') return '各渠道 APK 的包名、版本或签名不一致。请在“准备材料”中更换安装包后重新检查。';
     if (error.message === 'APK 包名与应用配置不一致') return 'APK 的 Android 包名与此应用不符。请确认应用选择和各渠道安装包。';

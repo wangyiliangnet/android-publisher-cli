@@ -29,10 +29,11 @@ test('Xiaomi onboarding accepts an email developer account and opens credential 
   await page.locator('[data-setup-select=xiaomi]').check();
   await page.getByRole('button', { name: /下一步：填写商店资料和账号/ }).click();
   await page.locator('#channel-client_id').fill('developer+release@example.com');
+  await page.getByText('使用文件路径', { exact: true }).click();
   await page.locator('#channel-icon_path').fill('/private/synthetic/../icon.png');
   await page.locator('#channel-privacy_url').fill('https://example.com/privacy');
   await page.getByRole('button', { name: '保存并填写账号凭据', exact: true }).click();
-  await page.getByText(/应用图标.*不要包含.*\.\./).waitFor({ timeout: 3000 });
+  await page.getByText(/图片路径无效/).waitFor({ timeout: 3000 });
   await page.locator('#channel-icon_path').fill('/private/synthetic/icon.png');
   await page.locator('#channel-privacy_url').fill('https://example.com/privacy?invalid=1');
   await page.getByRole('button', { name: '保存并填写账号凭据', exact: true }).click();
@@ -121,7 +122,7 @@ test('browser follows a real shared release across navigation without another su
   await page.getByRole('button', { name: '发布新版本', exact: true }).click();
   await page.locator('input[type="file"][accept*=".apk"]').first().setInputFiles({ name: 'synthetic.apk', mimeType: 'application/vnd.android.package-archive', buffer: Buffer.from('synthetic APK content') });
   await page.getByLabel(/更新说明/).first().fill('改进阅读体验，修复已知问题。 <b data-reader-note>说明原文</b>');
-  await page.getByText('已自动保存到本地', { exact: true }).waitFor();
+  await page.getByText('草稿已保存', { exact: true }).waitFor();
   await page.reload();
   assert.equal(await page.getByLabel(/更新说明/).first().inputValue(), '改进阅读体验，修复已知问题。 <b data-reader-note>说明原文</b>');
   assert.match(await page.locator('main').innerText(), /synthetic\.apk/);
@@ -234,7 +235,7 @@ test('Web independently creates accounts and applications, reuses credentials, a
   await page.locator('[data-setup-select=honor]').check();
   await page.getByRole('button', { name: /下一步：填写商店资料和账号/ }).click();
   await page.locator('#channel-app_id').fill('20001');
-  await page.getByText('已自动保存到本地', { exact: true }).waitFor();
+  await page.getByText('草稿已保存', { exact: true }).waitFor();
   await page.goto(web.url + '/#/setup/' + reader.project_id);
   await page.getByLabel('应用名称', { exact: true }).fill('阅读助手新版名称');
   await page.getByRole('button', { name: '保存应用资料', exact: true }).click();
@@ -245,7 +246,7 @@ test('Web independently creates accounts and applications, reuses credentials, a
   assert.equal(await page.locator('#channel-app_id').inputValue(), '20001');
   const notes = await create('笔记助手', 'com.example.notes');
   await configure(notes.project_id);
-  await page.getByRole('alert').filter({ hasText: /账号访问检查未通过/ }).waitFor();
+  await page.getByRole('alert').filter({ hasText: /无法读取应用资料/ }).waitFor();
   assert.equal(publisher.accounts().length, 1);
   const overviews = publisher.appOverviews();
   assert.equal(overviews.find(row => row.app_id === reader.project_id).channels[0].connected, true);

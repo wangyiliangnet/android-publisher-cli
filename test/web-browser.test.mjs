@@ -169,6 +169,18 @@ test('Web credential entry preserves multiline materials and clears every comple
   await page.getByRole('button', { name: '验证并保存', exact: true }).click(); await saved('honor');
   await open('honor'); assert.equal(await page.locator('#credential-client_secret').inputValue(), '');
   await page.keyboard.press('Escape');
+  await page.route('**/api/action', async route => {
+    if (route.request().postDataJSON()?.action === 'accounts.update') await route.abort();
+    else await route.continue();
+  });
+  await open('honor');
+  await page.locator('#credential-client_secret').fill('synthetic-disconnected-secret');
+  await page.getByRole('button', { name: '验证并保存', exact: true }).click();
+  await page.locator('#credential-error').getByText(/无法连接发布工具/).waitFor();
+  assert.equal(await page.locator('#credential-client_secret').inputValue(), '');
+  await noPersistence('synthetic-disconnected-secret');
+  await page.unroute('**/api/action');
+  await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 390, height: 844 }); await open('xiaomi');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.keyboard.press('Escape');
