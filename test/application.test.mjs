@@ -8,6 +8,8 @@ import { CredentialVault } from '../build/vault.js';
 import { releaseText, run } from '../build/cli.js';
 import { tokenScope } from '../build/state.js';
 import { generateKeyPairSync } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 function fixture(t, { lost = false, honor = false } = {}) {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-application-'));
@@ -142,7 +144,7 @@ test('Xiaomi email developer accounts remain reusable after removing the channel
   assert.equal(f.app.accounts().find(row => row.channel === 'xiaomi').client_id, xiaomi.client_id);
   f.app.saveApp(project, true);
   assert.deepEqual(f.app.accounts().find(row => row.channel === 'xiaomi'), {
-    channel: 'xiaomi', account: 'xiaomi-main', client_id: xiaomi.client_id, apps: [], app_names: [], saved: false,
+    channel: 'xiaomi', account: 'xiaomi-main', client_id: xiaomi.client_id, apps: [], app_names: [], saved: false, removal: { allowed: true },
   });
   for (const client_id of ['', ' developer@example.com', 'developer\n@example.com', 'a'.repeat(257)])
     assert.throws(() => f.app.saveApp({ ...project, channels: [ { ...xiaomi, client_id } ] }, true), /client_id/);
@@ -396,4 +398,156 @@ test('forgetting an account removes only its own upload materials and preserves 
   assert.deepEqual(f.app.store.readMaterial(operations[1]), { synthetic: true });
   assert.equal(f.app.store.operations(a.batch_id).length, 1);
   assert.throws(() => f.app.saveApp({ schema_version: 2, project_id: 'too-long', package_name: 'com.example.app', channels: [{ channel:'xiaomi',account:'synthetic',app_id:'com.example.app',client_id:'other',icon_path:'/synthetic/icon.png',privacy_url:'https://example.invalid/'+ 'a'.repeat(4100) }] }), /privacy_url/);
+});
+
+test('removing an unused account clears credentials and tokens, survives restart, and permits explicit re-adding', async t => {
+  const f = fixture(t);
+  const profile = { channel: 'honor', account: 'honor-unused', client_id: 'unused-client' };
+  f.app.saveAccount(profile);
+  await f.app.updateAccount('honor', profile.account, { client_secret: 'synthetic-unused' });
+  const scope = tokenScope('honor', profile.account, profile.client_id);
+  f.app.store.beginToken(scope);
+  f.app.store.finishToken(scope, 'synthetic-token', new Date(Date.now() + 3600000).toISOString());
+  assert.deepEqual(f.app.accounts().find(row => row.account === profile.account).removal, { allowed: true });
+  assert.deepEqual(await f.app.invoke('accounts.remove', profile), { removed: true });
+  assert.equal(f.vault.has('honor', profile.account), false);
+  assert.equal(f.app.store.db.prepare('SELECT token FROM token_leases WHERE scope=?').get(scope).token, '');
+  assert.equal(f.app.accounts().some(row => row.account === profile.account), false);
+  assert.deepEqual(f.calls, []);
+  const restarted = new PublisherApplication({ root: f.root, vault: f.vault });
+  try {
+    assert.equal(restarted.accounts().some(row => row.account === profile.account), false);
+    await assert.rejects(restarted.updateAccount('honor', profile.account, { client_secret: 'synthetic' }), /账号不存在/);
+    assert.throws(() => restarted.saveAccount({ ...profile, account: 'new-alias' }), /沿用原账号备注重新添加/);
+    restarted.saveAccount(profile);
+    assert.equal(restarted.accounts().find(row => row.account === profile.account).saved, false);
+  } finally { restarted.close(); }
+});
+
+test('account removal rejects current application bindings without clearing credentials', t => {
+  const f = fixture(t);
+  f.vault.save('tencent', 'tencent-main', { api_secret: 'synthetic-retained' });
+  f.app.saveApp({ ...f.app.app('demo'), project_id: 'second', display_name: '第二个应用' });
+  const status = f.app.accounts()[0].removal;
+  assert.equal(status.allowed, false); assert.equal(status.reason, 'applications');
+  assert.deepEqual(status.applications.map(app => app.id), ['demo', 'second']);
+  assert.throws(() => f.app.removeAccount('tencent', 'tencent-main'), /仍被应用选用/);
+  assert.equal(f.vault.has('tencent', 'tencent-main'), true);
+  assert.equal(f.app.store.accountRemoved('tencent', 'tencent-main'), false);
+});
+
+test('completed historical releases retain their identities and receipts without resurrecting a removed account', async t => {
+  const f = fixture(t);
+  await f.app.updateAccount('tencent', 'tencent-main', { api_secret: 'synthetic' });
+  const { release } = await f.app.prepareRelease(f.input);
+  await f.app.preflightRelease(release.batch_id);
+  const { plan } = f.app.reviewRelease(release.batch_id);
+  await f.app.submitRelease(release.batch_id, plan.approval_plan);
+  f.app.saveApp({ ...f.app.app('demo'), channels: [] }, true);
+  const batch = f.app.store.loadBatch(release.batch_id), operations = f.app.store.operations(release.batch_id);
+  assert.deepEqual(f.app.accounts()[0].removal, { allowed: true });
+  f.app.removeAccount('tencent', 'tencent-main');
+  assert.deepEqual(f.app.accounts(), []);
+  assert.deepEqual(f.app.store.loadBatch(release.batch_id), batch);
+  assert.deepEqual(f.app.store.operations(release.batch_id), operations);
+  assert.equal(f.app.release(release.batch_id).targets[0].account, 'tencent-main');
+  assert.equal(f.app.release(release.batch_id).all_accepted, true);
+  const restarted = new PublisherApplication({ root: f.root, vault: f.vault });
+  try { assert.deepEqual(restarted.accounts(), []); assert.equal(restarted.release(release.batch_id).targets[0].account, 'tencent-main'); }
+  finally { restarted.close(); }
+});
+
+test('account removal keeps unstarted release materials but blocks unresolved business and token requests', async t => {
+  const f = fixture(t);
+  const { release } = await f.app.prepareRelease(f.input);
+  f.app.saveApp({ ...f.app.app('demo'), channels: [] }, true);
+  f.app.removeAccount('tencent', 'tencent-main');
+  assert.equal(f.app.release(release.batch_id).has_writes, false);
+  f.app.saveAccount({ channel: 'tencent', account: 'tencent-main', client_id: 'example-user' });
+  await f.app.preflightRelease(release.batch_id);
+  const operation = f.app.store.beginOperation(release.batch_id, 'tencent', 'authorize', 'a'.repeat(64));
+  assert.throws(() => f.app.removeAccount('tencent', 'tencent-main'), /正在执行的提交或未决请求/);
+  f.app.store.finishOperation(operation, 'unknown');
+  assert.throws(() => f.app.removeAccount('tencent', 'tencent-main'), /正在执行的提交或未决请求/);
+  f.app.store.resolveOperation(operation, 'confirmed_not_applied');
+  f.app.removeAccount('tencent', 'tencent-main');
+  assert.equal(f.app.store.operationById(operation.id).effect, 'confirmed_not_applied');
+  f.app.saveAccount({ channel: 'honor', account: 'honor-unused', client_id: 'unused-client' });
+  f.vault.save('honor', 'honor-unused', { client_secret: 'synthetic-retained' });
+  const scope = tokenScope('honor', 'honor-unused', 'unused-client');
+  f.app.store.beginToken(scope);
+  assert.throws(() => f.app.removeAccount('honor', 'honor-unused'), /正在执行的提交或未决请求/);
+  f.app.store.failToken(scope, 'unknown');
+  assert.throws(() => f.app.removeAccount('honor', 'honor-unused'), /正在执行的提交或未决请求/);
+  assert.equal(f.vault.has('honor', 'honor-unused'), true);
+  assert.equal(f.app.store.db.prepare('SELECT effect FROM token_leases WHERE scope=?').get(scope).effect, 'unknown');
+});
+
+test('a submission awaiting local tools prevents removal before its first business intent', async t => {
+  const f = fixture(t, { honor: true });
+  const { release } = await f.app.prepareRelease(f.input);
+  await f.app.preflightRelease(release.batch_id);
+  const { plan } = f.app.reviewRelease(release.batch_id, ['tencent']);
+  f.app.saveApp({ ...f.app.app('demo'), channels: [] }, true);
+  const gate = Promise.withResolvers(), started = Promise.withResolvers();
+  const active = new PublisherApplication({ store: f.app.store, vault: f.vault, tools: async () => {
+    started.resolve(); await gate.promise; throw new Error('synthetic local tools failure');
+  } });
+  const pending = active.submitRelease(release.batch_id, plan.approval_plan);
+  await started.promise;
+  try {
+    assert.throws(() => active.removeAccount('tencent', 'tencent-main'), /正在执行的提交或未决请求/);
+    assert.throws(() => f.app.removeAccount('tencent', 'tencent-main'), /正在执行的提交或未决请求/);
+    active.removeAccount('honor', 'honor-main');
+  }
+  finally { gate.resolve(); }
+  await assert.rejects(pending, /synthetic local tools failure/);
+  active.removeAccount('tencent', 'tencent-main');
+  assert.deepEqual(active.accounts(), []);
+});
+
+test('CLI account removal confirms once and cancellation retains the account', async t => {
+  const f = fixture(t), output = [];
+  const profile = { channel: 'honor', account: 'honor-unused', client_id: 'unused-client' };
+  f.app.saveAccount(profile);
+  const terminal = answer => ({ ask: async label => { assert.equal(label, '输入 yes 移除'); return answer; },
+    write() {}, close() {}, suspend() {} });
+  await assert.rejects(run(['account', 'remove', 'honor', 'honor-unused'], { application: f.app, terminal: terminal('no'), output: text => output.push(text) }), /已取消/);
+  assert.equal(f.app.accounts().some(row => row.account === 'honor-unused'), true);
+  await assert.rejects(run(['account', 'remove', 'tencent', 'tencent-main'], { application: f.app, terminal: terminal('yes'), output: text => output.push(text) }), /仍被应用选用/);
+  assert.equal(await run(['account', 'remove', 'honor', 'honor-unused'], { application: f.app, terminal: terminal('yes'), output: text => output.push(text) }), 0);
+  assert.equal(f.app.accounts().some(row => row.account === 'honor-unused'), false);
+  assert.match(output.join(''), /账号已移除/);
+});
+
+test('a credential cleanup failure leaves the account visible and its credential file intact', t => {
+  const f = fixture(t);
+  f.app.saveAccount({ channel: 'honor', account: 'honor-unused', client_id: 'unused-client' });
+  f.vault.save('honor', 'honor-unused', { client_secret: 'synthetic-retained' });
+  const locked = new PublisherApplication({ root: f.root, vault: new CredentialVault(f.root, {
+    get() {}, put() {}, delete() { throw new Error('synthetic keychain locked'); },
+  }) });
+  try {
+    assert.throws(() => locked.removeAccount('honor', 'honor-unused'), /synthetic keychain locked/);
+    assert.equal(f.vault.has('honor', 'honor-unused'), true);
+    assert.equal(locked.accounts().some(row => row.account === 'honor-unused'), true);
+    assert.equal(f.app.store.accountRemoved('honor', 'honor-unused'), false);
+  } finally { locked.close(); }
+});
+
+test('account removal detects another submitting process and ignores its abandoned execution marker after exit', { timeout: 10000 }, async t => {
+  const f = fixture(t);
+  const { release } = await f.app.prepareRelease(f.input);
+  f.app.saveApp({ ...f.app.app('demo'), channels: [] }, true);
+  const script = `import { Store } from ${JSON.stringify(new URL('../build/state.js', import.meta.url).href)};
+    const store = new Store(process.argv[1]);
+    store.beginSubmission(process.argv[2], ['tencent']);
+    process.stdout.write('ready'); process.stdin.resume();`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, f.root, release.batch_id], { stdio: ['pipe', 'pipe', 'pipe'] });
+  t.after(() => { child.kill(); });
+  await once(child.stdout, 'data');
+  assert.throws(() => f.app.removeAccount('tencent', 'tencent-main'), /正在执行的提交或未决请求/);
+  const exited = once(child, 'exit'); child.kill(); await exited;
+  f.app.removeAccount('tencent', 'tencent-main');
+  assert.deepEqual(f.app.accounts(), []);
 });

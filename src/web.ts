@@ -5,6 +5,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { dataRoot, privateDir } from './private-file.js';
 import { parseStrictJSON } from './model.js';
+import { AccountRemovalError } from './application.js';
 import { CredentialInputError } from './credentials.js';
 import { page } from './web/page.js';
 import { clientScript } from './web/client.js';
@@ -18,22 +19,23 @@ export interface WebBackend {
 
 const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list', 'releases.prepare',
   'releases.preflight', 'releases.review', 'releases.submit', 'releases.get', 'releases.manual', 'releases.reconcile',
-  'accounts.list', 'accounts.save', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols',
+  'accounts.list', 'accounts.save', 'accounts.update', 'accounts.forget', 'accounts.remove', 'doctor', 'doctor.repair', 'protocols',
   'drafts.get', 'drafts.save', 'drafts.clear', 'jobs.start', 'jobs.get', 'jobs.list']);
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
 const actionErrors: Record<string, string> = {
   'apps.save': '应用资料未保存，请重试。',
-  'apps.check': '无法读取商店应用资料。请核对商店应用编号、账号权限或网络，再重新检查。',
+  'apps.check': '无法读取商店中的应用资料。请核对商店应用编号、账号权限或网络，再重新检查。',
   'releases.prepare': '发布材料检查未通过。请核对安装包和更新说明，再重新检查。',
-  'releases.preflight': '提交前检查未通过。请核对商店应用资料、账号权限或网络，再重新检查。',
-  'releases.review': '暂时无法确认提交。请重新检查所选渠道；若有提交结果待确认，请先核对提交结果。',
-  'releases.submit': '本次提交未完成。请打开发布记录，查看各渠道状态和下一步操作。',
+  'releases.preflight': '提交前检查未通过。请核对商店中的应用资料、账号权限或网络，再重新检查。',
+  'releases.review': '暂时无法确认提交。请重新检查所选商店；若有提交结果待确认，请先核对提交结果。',
+  'releases.submit': '本次提交未完成。请打开发布记录，查看各商店状态和下一步操作。',
   'releases.get': '查询失败，保留上次结果。请检查网络或账号权限后重新查询。',
-  'releases.manual': '人工核对记录未保存。请检查渠道、核对来源和核对时间，再重新保存。',
+  'releases.manual': '人工核对记录未保存。请检查商店、核对来源和核对时间，再重新保存。',
   'releases.reconcile': '无法确认提交结果。请保留发布记录，检查网络或账号权限后再次核对。',
+  'accounts.remove': '账号未移除。请刷新列表，并检查本地数据目录或钥匙串后重试。',
   'accounts.forget': '凭据未清除。请解锁 macOS 钥匙串后重试。',
-  'accounts.save': '渠道账号未保存。请核对账号备注和 API 接入标识，再重试。',
+  'accounts.save': '账号未保存。请核对账号备注和 API 接入标识，再重试。',
   'accounts.update': '凭据未保存。请核对账号权限和网络连接后重新填写。',
   'doctor.repair': '修复未完成。请检查网络和本地数据目录权限，再点击“修复”重试。',
   'drafts.get': '草稿无法读取，请重新打开页面重试。',
@@ -44,19 +46,21 @@ const actionErrors: Record<string, string> = {
 };
 
 function safeActionError(action: string, error: unknown): string {
+  if (action === 'accounts.remove' && error instanceof AccountRemovalError) return new AccountRemovalError(error.code).message;
   if (['apps.save', 'accounts.save'].includes(action) && error instanceof Error) {
-    if (error.message === '此 API 账号已接入，请选择已有渠道账号。') return '这个 API 账号已保存。请使用已有渠道账号，无需重复添加。';
-    if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个渠道账号已关联原 API 客户端。要使用另一个客户端，请选择“新增渠道账号”。';
+    if (error.message === '此 API 账号已移除，请沿用原账号备注重新添加。') return error.message;
+    if (error.message === '此 API 账号已接入，请选择已有渠道账号。') return '这个 API 账号已保存。请使用已有账号，无需重复添加。';
+    if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个账号已关联原 API 客户端。要使用另一个客户端，请选择“新增账号”。';
   }
   if (action === 'releases.prepare' && error instanceof Error) {
     if (/^(APK 检查组件|检查组件|自带运行时|另一个进程正在安装)/.test(error.message)) return '安装包检查不可用。请打开“环境检查”，点击“修复”后重试。';
-    if (error.message === '应用尚未配置发布渠道，请先添加发布渠道') return error.message;
-    if (error.message === 'all APKs must have the same package, version and signer') return '各渠道 APK 的包名、版本或签名不一致。请在“准备材料”中更换安装包后重新检查。';
-    if (error.message === 'APK 包名与应用配置不一致') return 'APK 的 Android 包名与此应用不符。请确认应用选择和各渠道安装包。';
+    if (error.message === '应用尚未配置发布渠道，请先添加发布渠道') return '应用尚未配置发布商店，请先配置商店。';
+    if (error.message === 'all APKs must have the same package, version and signer') return '各商店 APK 的包名、版本或签名不一致。请在“准备材料”中更换安装包后重新检查。';
+    if (error.message === 'APK 包名与应用配置不一致') return 'APK 的 Android 包名与此应用不符。请确认应用选择和各商店安装包。';
     if (error.message === 'debuggable APK cannot be published') return '选择的 APK 是调试包。请使用已签名的正式发布安装包。';
     if (/^更新说明去掉首尾空白/.test(error.message)) return '更新说明至少需要 5 个字符，并使用常规文本与换行。请修改后重新检查。';
-    if (/更新说明最多 (200|500) 个字符/.test(error.message)) return '更新说明超出所选渠道的长度限制。vivo 最多 200 个字符，其他渠道最多 500 个字符。请缩短后重新检查。';
-    if (/^(xiaomi|oppo|vivo): configured app ID differs from APK package$/.test(error.message)) return '所选 APK 的 Android 包名与应用资料不符。请确认应用选择和各渠道安装包。';
+    if (/更新说明最多 (200|500) 个字符/.test(error.message)) return '更新说明超出所选商店的长度限制。vivo 最多 200 个字符，其他商店最多 500 个字符。请缩短后重新检查。';
+    if (/^(xiaomi|oppo|vivo): configured app ID differs from APK package$/.test(error.message)) return '所选 APK 的 Android 包名与应用资料不符。请确认应用选择和各商店安装包。';
   }
   return actionErrors[action] ?? '操作未完成。请返回应用查看已保存的资料和发布进度，再重试。';
 }

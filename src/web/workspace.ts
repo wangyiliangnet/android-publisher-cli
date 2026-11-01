@@ -16,17 +16,24 @@ export class WebWorkspace {
     const value = readJSON(file, 512 * 1024, true);
     this.validate(kind, value);
     if (kind === 'release' && (value as { app_id: string }).app_id !== id) throw new Error('draft belongs to another application');
+    if (this.emptyRelease(kind, value)) { this.clear(kind, id); return null; }
     return value;
   }
   save(kind: unknown, id: unknown, value: unknown): void {
     const file = this.file(kind, id);
     this.validate(kind, value);
     if (kind === 'release' && (value as { app_id: string }).app_id !== id) throw new Error('draft belongs to another application');
+    if (this.emptyRelease(kind, value)) { this.clear(kind, id); return; }
     writePrivate(file, JSON.stringify(value) + '\n', true, true);
   }
   clear(kind: unknown, id: unknown): void {
     const file = this.file(kind, id);
     if (fs.existsSync(file)) { readJSON(file, 512 * 1024, true); fs.unlinkSync(file); }
+  }
+  private emptyRelease(kind: unknown, value: unknown): boolean {
+    if (kind !== 'release') return false;
+    const draft = value as { channels: string[]; apks: Record<string, string>; release_notes: string };
+    return !draft.release_notes.trim() && !draft.channels.some(channel => draft.apks[channel]);
   }
   private validate(kind: unknown, value: unknown): void {
     if (kind === 'app' || kind === 'app-details') {

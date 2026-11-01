@@ -130,7 +130,7 @@ function help(context = ''): string {
     publish: 'android-release publish [应用] [--channels huawei,honor] [--apk huawei=/绝对路径/one.apk] [--notes-file /绝对路径/notes.txt]\n\n默认全部已配置渠道，逐渠道明确指定 APK。工具检查材料与渠道，展示摘要，确认一次后提交。再次进入可继续已有发布。\n',
     status: 'android-release status [应用] [--release 记录] [--cached] [--json] [--record-manual] [--reconcile]\n\n默认查询最近一次发布。--cached 只读本地记录；--record-manual 记录人工核对；--reconcile 只读取能够核对未决请求的远端证据。\n',
     history: 'android-release history [应用] [--json]\n\n查看本地发布历史，不访问商店。\n',
-    account: 'android-release account add [渠道] [账号]\nandroid-release account list [--json]\nandroid-release account update [渠道] [账号]\nandroid-release account forget [渠道] [账号]\n\n密钥通过终端隐藏输入，加密保存在本地。JSON 和 PEM 材料要求当前用户所有、权限 0600。\n',
+    account: 'android-release account add [渠道] [账号]\nandroid-release account list [--json]\nandroid-release account update [渠道] [账号]\nandroid-release account forget [渠道] [账号]\nandroid-release account remove [商店] [账号]\n\nforget 清除凭据并保留账号；remove 移除未被应用选用、没有正在执行的提交或未决请求的账号。\n密钥通过终端隐藏输入，加密保存在本地。JSON 和 PEM 材料要求当前用户所有、权限 0600。\n',
     doctor: 'android-release doctor [--repair] [--json]\n\n检查工具自带组件。--repair 自动安装固定版本的 APK 校验组件，无需手动配置 Android SDK 或 JDK。\n',
     web: 'android-release web [--port 端口] [--no-open]\n\n启动仅监听 127.0.0.1 的本地 Web 端，与 CLI 共用应用、账号和发布记录。\n',
     protocols: 'android-release protocols [--json]\n\n查看渠道查询、核对能力和真实验证范围。\n',
@@ -221,7 +221,7 @@ export async function run(args: string[], injected: { application?: PublisherApp
       const action = args[1];
       if (action === 'list') { allow(flags, ['json']); const accounts = application().accounts(); if (flags.json) json({ accounts }); else out(accounts.length ? table([['渠道', '账号备注', '凭据', '应用'], ...accounts.map(row => [channelNames[row.channel], row.account, row.saved ? '已保存' : '待配置', row.app_names.join('、') || '暂未关联应用'])]) : '尚无渠道账号。运行 android-release account add 添加。\n'); return 0; }
       allow(flags, []);
-      if (!['add', 'update', 'forget'].includes(action ?? '') || positional.length > 2) throw new Error('使用 account add、account list、account update 或 account forget');
+      if (!['add', 'update', 'forget', 'remove'].includes(action ?? '') || positional.length > 2) throw new Error('使用 account add、account list、account update、account forget 或 account remove');
       const channel = positional[0] ?? await io.ask('渠道', CHANNELS[0]);
       if (!isChannel(channel)) throw new Error('未知渠道');
       const accounts = application().accounts().filter(row => row.channel === channel);
@@ -233,6 +233,14 @@ export async function run(args: string[], injected: { application?: PublisherApp
         selected = application().accounts().find(row => row.channel === channel && row.account === account);
       }
       if (!selected) throw new Error('渠道账号不存在，请先运行 android-release account add');
+      if (action === 'remove') {
+        if (!selected.removal.allowed && selected.removal.reason === 'applications')
+          io.write('仍被以下应用选用：' + selected.removal.applications.map(app => `${app.name}（android-release app channels ${app.id}）`).join('、') + '\n');
+        application().assertAccountRemovable(channel, account);
+        io.write(`将从本工具移除 ${channelNames[channel]} / ${account}，并清除本地凭据。历史发布记录会保留，商店中的真实账号不受影响。\n`);
+        if (await io.ask('输入 yes 移除') !== 'yes') throw new Canceled();
+        application().removeAccount(channel, account); out('账号已移除，历史发布记录仍保留。\n'); return 0;
+      }
       if (action === 'forget') {
         io.write(`将清除 ${channelNames[channel]} / ${account} 的本地凭据。${selected.apps.length ? '受影响应用：' + selected.app_names.join('、') : '目前没有应用关联'}。发布回执和未决请求记录会保留。\n`);
         if (await io.ask('输入 yes 清除') !== 'yes') throw new Canceled();

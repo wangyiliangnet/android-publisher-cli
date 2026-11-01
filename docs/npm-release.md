@@ -16,7 +16,7 @@
 
 确认合并后 `main` 顶端提交的必需 `check` 通过。在 GitHub Releases 建立 `vVERSION` 标签，目标选该提交，将 `VERSION` 换成实际版本号。
 
-发布说明写用户可见变化、Node.js 要求、旧发布记录能否继续使用、已知限制和真实渠道账号验证情况。预发布版本勾选 **Set as a pre-release**；正式版本不勾选。
+发布说明写用户可见变化、Node.js 要求、旧发布记录能否继续使用、已知限制和真实商店账号验证情况。预发布版本勾选 **Set as a pre-release**；正式版本不勾选。
 
 公开发布 Release 会触发 [publish-npm.yml](../.github/workflows/publish-npm.yml)。工作流核对标签、包版本、锁文件、Release 类型与 `main` 提交，再运行完整检查、打包并独立安装同一份压缩包。
 

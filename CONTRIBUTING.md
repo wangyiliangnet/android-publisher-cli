@@ -29,11 +29,11 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 | --- | --- | --- |
 | 安装、诊断、配置向导 | [安装](docs/getting-started.md)、[应用配置](docs/configuration.md) | 缺失工具有修复方法，输入说明明确，重配保留已有账号备注 |
 | 发布批次、执行、状态或恢复 | [架构说明](docs/architecture.md)、[查询与恢复](docs/status-and-recovery.md) | 请求前保存意图，响应丢失后重启不能重复发送 |
-| 渠道请求与查询 | [渠道接口](docs/channels/protocol-evidence.md) | 核对官方字段，覆盖成功、错误与无法关联本次版本的结果 |
+| 商店请求与查询 | [商店接口](docs/channels/protocol-evidence.md) | 核对官方字段，覆盖成功、错误与无法关联本次版本的结果 |
 | npm 打包与发布 | [安装包验收](docs/npm-package.md)、[CLI 发版](docs/npm-release.md) | 安装实际压缩包，检查文件清单、命令入口和版本 |
 | 使用文档 | [README](README.md) 的阅读入口 | 先说明任务和作用，再给步骤、成功判断和失败处理 |
 
-每个用户概念使用[领域词汇表](GLOSSARY.md)中的名称。用户文档称 `project` 为“应用配置”，`batch` 为“发布批次”，`target` 为“渠道目标”，`approval` 为“提交计划”，并在首次出现时对应到命令字段。维护文档保留必要的状态、表和类型名称。
+每个用户概念使用[领域词汇表](GLOSSARY.md)中的名称。用户文档称 `project` 为“应用配置”，`batch` 为“发布批次”，`target` 为“发布目标”，`approval` 为“提交计划”，并在首次出现时对应到命令字段。维护文档保留必要的状态、表和类型名称。
 
 界面、命令输出和使用文档统一用“本地”描述数据、文件和服务。环境准备称“环境检查”，APK 校验称“安装包检查”。
 
@@ -41,11 +41,11 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 
 代码 agent 使用 `codex/topic` 分支，并在本仓库配置 GitHub noreply 提交邮箱。不要直接推送、强制推送或删除 `main`。
 
-按改动运行检查，向 `main` 创建 PR。说明解决的问题、变更后的行为、实际完成的验证，以及兼容性和仍待验证的渠道条件。合并前，以待合并提交的必需 CI `check` 为准；处理实质性审查意见后 squash 合并。
+按改动运行检查，向 `main` 创建 PR。说明解决的问题、变更后的行为、实际完成的验证，以及兼容性和仍待验证的商店条件。合并前，以待合并提交的必需 CI `check` 为准；处理实质性审查意见后 squash 合并。
 
 [check.yml](.github/workflows/check.yml) 会检查公开源码、工作流、TypeScript 和测试，并安装实际 npm 包验证入口。CI 只使用临时身份与合成材料。
 
-渠道协议由本仓库独立实现，复用第三方代码前须核对许可证。真实账号、APK、私钥、Cookie、带签名的上传地址和原始响应不能进入 Git、issue 或构建产物。示例使用 `com.example.app`、`example.invalid` 等虚构资料。
+商店协议由本仓库独立实现，复用第三方代码前须核对许可证。真实账号、APK、私钥、Cookie、带签名的上传地址和原始响应不能进入 Git、issue 或构建产物。示例使用 `com.example.app`、`example.invalid` 等虚构资料。
 
 发布本工具的新版本，按 [CLI 发版流程](docs/npm-release.md)创建版本 PR 和 GitHub Release。代码测试、PR、打包或 CLI 发版均不构成 Android 应用提审授权。
 
@@ -57,4 +57,4 @@ Web 用户旅程和凭据表单有独立的合成数据浏览器回归。普通�
 PUBLISHER_BROWSER_TESTS=1 PUBLISHER_BROWSER_CHANNEL=chrome npm run check
 ```
 
-Playwright 不在默认模块路径时，用 `PUBLISHER_PLAYWRIGHT_MODULE` 指定其 `index.mjs` 入口。回归使用新的浏览器上下文和临时状态，覆盖接入、草稿恢复、修改材料、单次确认、部分失败重试、未决提交、人工记录、移动端及凭据清空。共享后端集成测试验证离开页面后提交继续，刷新不会重复写入。全部渠道响应均为合成数据。
+Playwright 不在默认模块路径时，用 `PUBLISHER_PLAYWRIGHT_MODULE` 指定其 `index.mjs` 入口。回归使用新的浏览器上下文和临时状态，覆盖接入、草稿恢复、修改材料、单次确认、部分失败重试、未决提交、人工记录、移动端及凭据清空。共享后端集成测试验证离开页面后提交继续，刷新不会重复写入。全部商店响应均为合成数据。
