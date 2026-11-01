@@ -41,6 +41,24 @@ export class RecoveryRequired extends Error {
   constructor(message: string) { super(message); this.name = 'RecoveryRequired'; }
 }
 
+export type AccountRemoval = { allowed: true } |
+  { allowed: false; reason: 'applications'; applications: Array<{ id: string; name: string }> } |
+  { allowed: false; reason: 'pending' };
+export interface AccountView extends AccountProfile {
+  apps: string[];
+  app_names: string[];
+  saved: boolean;
+  removal: AccountRemoval;
+}
+export class AccountRemovalError extends Error {
+  constructor(readonly code: 'applications' | 'pending' | 'missing' | 'invalid') {
+    super({ applications: '账号仍被应用选用，请先在应用设置中更换账号或移除对应商店。',
+      pending: '账号仍有正在执行的提交或未决请求，请先处理原发布记录和账号请求。',
+      missing: '账号不存在或已移除，请刷新账号列表。', invalid: '账号资料无效，请重新选择账号。' }[code]);
+    this.name = 'AccountRemovalError';
+  }
+}
+
 /** Both frontends use this boundary. Only submitRelease can issue business writes. */
 export class PublisherApplication {
   readonly store: Store;
@@ -77,7 +95,8 @@ export class PublisherApplication {
     const knownAccounts = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()];
     for (const row of app.channels) for (const saved of knownAccounts) {
       if (row.channel === saved.channel && row.client_id && row.client_id === saved.client_id && row.account !== saved.account)
-        throw new Error('此 API 账号已接入，请选择已有渠道账号。');
+        throw new Error(this.store.accountRemoved(saved.channel, saved.account)
+          ? '此 API 账号已移除，请沿用原账号备注重新添加。' : '此 API 账号已接入，请选择已有渠道账号。');
       if (row.channel === saved.channel && row.account === saved.account && row.client_id && saved.client_id && row.client_id !== saved.client_id)
         throw new Error('这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。');
     }
@@ -151,14 +170,14 @@ export class PublisherApplication {
         isChannel(item.channel) && validHash(item.bindings_digest) && typeof item.connected === 'boolean' &&
         typeof item.checked_at === 'string' && Number.isFinite(Date.parse(item.checked_at))).map(item => ({
           channel: item.channel, bindings_digest: item.bindings_digest, connected: item.connected, checked_at: item.checked_at,
-          ...(item.connected ? {} : { issue: '账号访问检查未通过。请检查凭据、商店应用资料或网络，再重新检查。' }),
+          ...(item.connected ? {} : { issue: '账号访问检查未通过。请检查凭据、商店中的应用资料或网络，再重新检查。' }),
         })) : [];
     } catch { return []; }
   }
   private saveConnection(app: Project, row: ProjectChannel, connected: boolean): void {
     const channels = this.connections(app).filter(item => item.channel !== row.channel);
     channels.push({ channel: row.channel, bindings_digest: digest([app.package_name, row]), connected,
-      checked_at: new Date().toISOString(), ...(connected ? {} : { issue: '账号访问检查未通过。请检查凭据、商店应用资料或网络，再重新检查。' }) });
+      checked_at: new Date().toISOString(), ...(connected ? {} : { issue: '账号访问检查未通过。请检查凭据、商店中的应用资料或网络，再重新检查。' }) });
     writePrivate(this.connectionFile(app.project_id), JSON.stringify({ channels }) + '\n', true, true);
   }
   appOverviews(): Array<Record<string, unknown>> {
@@ -216,6 +235,7 @@ export class PublisherApplication {
       const clientId = row.client_id ?? profiles.find(item => item.channel === row.channel && item.account === row.account)?.client_id;
       writePrivate(path.join(this.root, 'account-profiles', `${digest([row.channel, row.account])}.json`),
         JSON.stringify({ channel: row.channel, account: row.account, ...(clientId ? { client_id: clientId } : {}) }) + '\n', true, true);
+      this.store.setAccountRemoved(row.channel, row.account, false);
     }
   }
   saveAccount(value: unknown): AccountProfile {
@@ -226,12 +246,14 @@ export class PublisherApplication {
     const known = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()];
     for (const saved of known.filter(row => row.channel === profile.channel)) {
       if (profile.client_id && profile.client_id === saved.client_id && profile.account !== saved.account)
-        throw new Error('此 API 账号已接入，请选择已有渠道账号。');
+        throw new Error(this.store.accountRemoved(saved.channel, saved.account)
+          ? '此 API 账号已移除，请沿用原账号备注重新添加。' : '此 API 账号已接入，请选择已有渠道账号。');
       if (profile.account === saved.account && saved.client_id && profile.client_id !== saved.client_id)
         throw new Error('这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。');
     }
     writePrivate(path.join(this.root, 'account-profiles', `${digest([profile.channel, profile.account])}.json`),
       JSON.stringify(profile) + '\n', true, true);
+    this.store.setAccountRemoved(profile.channel, profile.account, false);
     return profile;
   }
   private accountProfiles(): AccountProfile[] {
@@ -269,7 +291,7 @@ export class PublisherApplication {
     try { await this.updateAccount(channel, account, credentials); }
     finally { for (const field of Object.keys(credentials)) delete credentials[field]; }
   }
-  accounts(): Array<{ channel: Channel; account: string; apps: string[]; app_names: string[]; saved: boolean; client_id?: string }> {
+  accounts(): AccountView[] {
     const result = new Map<string, { channel: Channel; account: string; apps: string[]; app_names: string[]; saved: boolean; client_id?: string }>();
     for (const { app, row } of this.accountBindings()) {
       const key = `${row.channel}:${row.account}`;
@@ -280,7 +302,8 @@ export class PublisherApplication {
     }
     for (const row of this.accountProfiles()) if (!result.has(`${row.channel}:${row.account}`))
       result.set(`${row.channel}:${row.account}`, { ...row, apps: [], app_names: [], saved: this.vault.has(row.channel, row.account) });
-    return [...result.values()];
+    return [...result.values()].filter(row => !this.store.accountRemoved(row.channel, row.account))
+      .map(row => ({ ...row, removal: this.accountRemoval(row.channel, row.account) }));
   }
   forgetAccount(channel: Channel, account: string): void {
     if (!isChannel(channel) || !validId(account)) throw new Error('invalid account');
@@ -288,6 +311,33 @@ export class PublisherApplication {
     const clientIds = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()]
       .filter(row => row.channel === channel && row.account === account).map(row => row.client_id ?? row.account);
     this.store.forgetAccountMaterials(channel, account, clientIds);
+  }
+  private accountRemoval(channel: Channel, account: string): AccountRemoval {
+    const applications = this.apps().filter(app => app.channels.some(row => row.channel === channel && row.account === account))
+      .map(app => ({ id: app.project_id, name: app.display_name ?? app.project_id }));
+    if (applications.length) return { allowed: false, reason: 'applications', applications };
+    const clientIds = new Set(this.accountProfiles().filter(row => row.channel === channel && row.account === account)
+      .map(row => row.client_id ?? row.account));
+    for (const id of this.store.batchIds()) for (const target of this.store.loadBatch(id).targets) {
+      if (target.channel !== channel || target.account !== account) continue;
+      clientIds.add(target.client_id ?? target.account);
+      if (this.store.submissionRunning(id, channel) || this.store.recovery(id, channel).length)
+        return { allowed: false, reason: 'pending' };
+    }
+    if (this.store.pendingAccountToken(channel, account, [...clientIds])) return { allowed: false, reason: 'pending' };
+    return { allowed: true };
+  }
+  assertAccountRemovable(channel: Channel, account: string): void {
+    if (!isChannel(channel) || !validId(account)) throw new AccountRemovalError('invalid');
+    if (!this.accounts().some(row => row.channel === channel && row.account === account)) throw new AccountRemovalError('missing');
+    const status = this.accountRemoval(channel, account);
+    if (!status.allowed) throw new AccountRemovalError(status.reason);
+  }
+  removeAccount(channel: Channel, account: string): void {
+    this.assertAccountRemovable(channel, account);
+    this.forgetAccount(channel, account);
+    // Keep public identity reservations and immutable history; hide the account until explicitly added again.
+    this.store.setAccountRemoved(channel, account, true);
   }
   async prepareRelease(input: PrepareReleaseInput): Promise<{ release: ReleaseView; duplicate: boolean; related_release?: string }> {
     const app = this.app(input.app_id);
@@ -365,8 +415,11 @@ export class PublisherApplication {
     for (const target of batch.targets) if (!attemptOnly && !plan.selected_channels.includes(target.channel) && this.store.operations(id, target.channel).length)
       throw new RecoveryRequired(`${target.channel}：已有执行记录，无法用旧计划缩小范围。请重新查看并核对本次发布`);
     if (!attemptOnly) writePrivate(path.join(this.root, 'release-scopes', `${id}.json`), JSON.stringify({ selected_channels: plan.selected_channels }) + '\n', true, true);
-    const result = await submit(this.store, id, file, hash, this.source(batch.targets), await this.tools(), true, this.fetcher);
-    return { release: this.release(id), errors: result.errors as Record<string, string> };
+    const execution = this.store.beginSubmission(id, plan.selected_channels);
+    try {
+      const result = await submit(this.store, id, file, hash, this.source(batch.targets), await this.tools(), true, this.fetcher);
+      return { release: this.release(id), errors: result.errors as Record<string, string> };
+    } finally { this.store.finishSubmission(execution); }
   }
   async getRelease(id: string, update = false): Promise<{ release: ReleaseView; errors: Record<string, string> }> {
     const batch = this.store.loadBatch(id);
@@ -416,6 +469,7 @@ export class PublisherApplication {
         if (Object.keys(p).some(key => !['channel', 'account', 'credentials', 'files'].includes(key))) throw new CredentialInputError('input');
         await this.updateAccountFromInput(p.channel, p.account, p.credentials, p.files);
         return { updated: true };
+      case 'accounts.remove': this.removeAccount(text('channel') as Channel, text('account')); return { removed: true };
       case 'accounts.forget': this.forgetAccount(text('channel') as Channel, text('account')); return { forgotten: true };
       case 'doctor': return runtimeDiagnostic(this.root);
       case 'doctor.repair': await ensureRuntime(this.root, this.options.progress); return runtimeDiagnostic(this.root);

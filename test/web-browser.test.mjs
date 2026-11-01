@@ -47,7 +47,7 @@ test('Web credential entry preserves multiline materials and clears every comple
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => logs.push(message.text()));
   page.on('request', request => { if (request.url().endsWith('/api/upload')) uploads++; });
-  const row = channel => page.locator('tr').filter({ has: page.getByText(channel + '-main', { exact: true }) });
+  const row = channel => page.locator('tr').filter({ has: page.getByText('账号备注：' + channel + '-main', { exact: true }) });
   const open = async channel => { await row(channel).getByRole('button', { name: /^(填写凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
   const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新凭据', exact: true }).waitFor(); };
   const empty = handle => handle.evaluate(form => [...form.querySelectorAll('input,textarea')].every(control => control.value === ''));
@@ -254,7 +254,7 @@ test('Web environment checks put repair beside the affected function and separat
   assert.equal(await page.getByRole('button', { name: /修复/ }).count(), 0);
   current = diagnostic('credentials');
   await page.getByRole('button', { name: '重新检查', exact: true }).click();
-  await page.locator('.check-list li').filter({ hasText: '账号凭据保存' }).getByText('不可用', { exact: true }).waitFor();
+  await page.locator('.check-list li').filter({ hasText: '凭据保存' }).getByText('不可用', { exact: true }).waitFor();
   assert.equal(await page.getByText('环境检查通过。', { exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: /修复/ }).count(), 0);
 

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { type Approval, type Availability, type Batch, type Channel, digest, type Effect, type FrozenTarget, type Phase, type Preflight, type Review } from './model.js';
@@ -132,10 +133,42 @@ export class Store {
       PRAGMA user_version=2;
       COMMIT;
     `);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS running_submissions (
+      id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batches(id), process_id INTEGER NOT NULL, channels TEXT NOT NULL
+    )`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS removed_accounts (
+      channel TEXT NOT NULL, account TEXT NOT NULL, PRIMARY KEY(channel, account)
+    )`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS manual_observations (
       id INTEGER PRIMARY KEY, batch_id TEXT NOT NULL, channel TEXT NOT NULL, document TEXT NOT NULL,
       FOREIGN KEY(batch_id, channel) REFERENCES targets(batch_id, channel)
     )`);
+  }
+
+  beginSubmission(batchId: string, channels: Channel[]): string {
+    const id = randomUUID();
+    this.db.prepare('INSERT INTO running_submissions(id,batch_id,process_id,channels) VALUES (?,?,?,?)').run(id, batchId, process.pid, JSON.stringify(channels));
+    return id;
+  }
+  finishSubmission(id: string): void { this.db.prepare('DELETE FROM running_submissions WHERE id=?').run(id); }
+  submissionRunning(batchId: string, channel: Channel): boolean {
+    return rows<{ process_id: number; channels: string }>(this.db, 'SELECT process_id,channels FROM running_submissions WHERE batch_id=?', batchId).some(record => {
+      if (!(JSON.parse(record.channels) as Channel[]).includes(channel)) return false;
+      try { process.kill(record.process_id, 0); return true; }
+      catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+    });
+  }
+
+  accountRemoved(channel: Channel, account: string): boolean {
+    return Boolean(row(this.db, 'SELECT 1 FROM removed_accounts WHERE channel=? AND account=?', channel, account));
+  }
+  setAccountRemoved(channel: Channel, account: string, removed: boolean): void {
+    if (removed) this.db.prepare('INSERT OR IGNORE INTO removed_accounts(channel,account) VALUES (?,?)').run(channel, account);
+    else this.db.prepare('DELETE FROM removed_accounts WHERE channel=? AND account=?').run(channel, account);
+  }
+  pendingAccountToken(channel: Channel, account: string, clientIds: string[]): boolean {
+    return clientIds.some(clientId => Boolean(row(this.db,
+      "SELECT 1 FROM token_leases WHERE scope=? AND effect IN ('intent','unknown')", tokenScope(channel, account, clientId))));
   }
 
   close(): void { this.db.close(); }

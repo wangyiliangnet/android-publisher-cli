@@ -38,6 +38,6 @@ npm install --global --prefix "$prefix" --ignore-scripts "./$archive"
 
 ## 交付与版本约束
 
-保留同一份通过验证的压缩包及校验文件。许可证和来源见[第三方声明](../THIRD_PARTY_NOTICES.md)。真实渠道密钥和 APK 不能进入 npm 包、CI 或 GitHub 发布附件。
+保留同一份通过验证的压缩包及校验文件。许可证和来源见[第三方声明](../THIRD_PARTY_NOTICES.md)。真实商店密钥和 APK 不能进入 npm 包、CI 或 GitHub 发布附件。
 
 npm 上同一包名的同一版本只能发布一次。内容改变后须使用新版本号，再构建、验收和发布，不能覆盖旧版本。

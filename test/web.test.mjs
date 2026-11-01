@@ -326,3 +326,55 @@ test('selected APK and unfinished setup survive a local web service restart', as
   assert.equal((await (await action('drafts.get', { kind: 'app', id: 'new-app' })).json()).draft.display_name, '未完成应用');
   assert.equal((await action('drafts.save', { kind: 'app', id: 'new-app', value: { client_secret: 'synthetic' } })).status, 400);
 });
+
+test('Web account removal rechecks current bindings and returns only safe rejection reasons', async t => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publisher-remove-account-'));
+  const publisher = new PublisherApplication({ root });
+  t.after(() => { publisher.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const web = await fixture(t, (action, payload) => publisher.invoke(action, payload));
+  const profile = { channel: 'honor', account: 'honor-main', client_id: 'synthetic-client' };
+  publisher.saveAccount(profile);
+  const listing = await (await web.action('accounts.list')).json();
+  assert.equal(listing.accounts[0].removal.allowed, true);
+  publisher.saveApp({ schema_version: 2, project_id: 'reader', display_name: '阅读助手', package_name: 'com.example.reader',
+    channels: [{ ...profile, app_id: '10001' }] });
+  const denied = await web.action('accounts.remove', { channel: 'honor', account: 'honor-main' });
+  assert.equal(denied.status, 400); assert.match((await denied.json()).error, /仍被应用选用/);
+  assert.equal(publisher.accounts().length, 1);
+  publisher.saveApp({ ...publisher.app('reader'), channels: [] }, true);
+  const removed = await web.action('accounts.remove', { channel: 'honor', account: 'honor-main' });
+  assert.deepEqual(await removed.json(), { removed: true });
+  assert.deepEqual((await (await web.action('accounts.list')).json()).accounts, []);
+  const failed = await fixture(t, async () => { throw new Error('synthetic-secret-do-not-expose'); });
+  const response = await failed.action('accounts.remove', { channel: 'honor', account: 'honor-main' });
+  assert.doesNotMatch(await response.text(), /synthetic-secret/);
+});
+
+test('release drafts retain only selected APKs or nonblank notes and discard legacy empty drafts', async t => {
+  const app = await fixture(t);
+  const draft = { app_id: 'demo', channels: ['huawei'], apks: {}, release_notes: '' };
+  const file = path.join(app.root, 'web-drafts', 'release', 'demo.json');
+  const save = async value => { assert.equal((await app.action('drafts.save', { kind: 'release', id: 'demo', value })).status, 200); };
+  const get = async () => (await (await app.action('drafts.get', { kind: 'release', id: 'demo' })).json()).draft;
+  await save(draft);
+  assert.equal(await get(), null);
+  assert.equal(fs.existsSync(file), false);
+  await save({ ...draft, release_notes: ' \n\t　' });
+  assert.equal(await get(), null);
+  await save({ ...draft, release_notes: '改' });
+  assert.equal((await get()).release_notes, '改');
+  await save({ ...draft, release_notes: '  ' });
+  assert.equal(await get(), null);
+  const withAPK = { ...draft, apks: { huawei: '/private/synthetic/application.apk' } };
+  await save(withAPK);
+  assert.deepEqual(await get(), withAPK);
+  await save({ ...withAPK, channels: [] });
+  assert.equal(await get(), null);
+  await save({ ...draft, release_id: 'old-check' });
+  assert.equal(await get(), null);
+  fs.writeFileSync(file, JSON.stringify(draft), { mode: 0o600 });
+  assert.equal(await get(), null);
+  assert.equal(fs.existsSync(file), false);
+  await app.action('drafts.save', { kind: 'app', id: 'new-app', value: {} });
+  assert.deepEqual((await (await app.action('drafts.get', { kind: 'app', id: 'new-app' })).json()).draft, {});
+});
