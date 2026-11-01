@@ -18,7 +18,7 @@ export interface WebBackend {
 
 const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list', 'releases.prepare',
   'releases.preflight', 'releases.review', 'releases.submit', 'releases.get', 'releases.manual', 'releases.reconcile',
-  'accounts.list', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols',
+  'accounts.list', 'accounts.save', 'accounts.update', 'accounts.forget', 'doctor', 'doctor.repair', 'protocols',
   'drafts.get', 'drafts.save', 'drafts.clear', 'jobs.start', 'jobs.get', 'jobs.list']);
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
@@ -33,6 +33,7 @@ const actionErrors: Record<string, string> = {
   'releases.manual': '人工核对记录未保存。请检查渠道、核对来源和核对时间，再重新保存。',
   'releases.reconcile': '提交结果检查未完成。原请求记录已保留，请检查网络或渠道账号权限后重新检查。',
   'accounts.forget': '本机凭据清除未完成。请解锁钥匙串后重试，原发布记录和请求回执仍保留。',
+  'accounts.save': '渠道账号未保存。请检查渠道、账号备注和 API 接入标识，并核对是否已有同一账号。',
   'accounts.update': '凭据更新未完成。请核对材料、账号权限、网络与钥匙串状态，并查看当前账号状态；存在未决令牌请求时，须先核对原请求。',
   'doctor.repair': '检查组件安装或修复未完成。请检查网络和本机目录权限后重试。',
   'drafts.get': '本机草稿未能读取。请保留现有资料，检查本机目录权限。',
@@ -43,11 +44,12 @@ const actionErrors: Record<string, string> = {
 };
 
 function safeActionError(action: string, error: unknown): string {
-  if (action === 'apps.save' && error instanceof Error) {
+  if (['apps.save', 'accounts.save'].includes(action) && error instanceof Error) {
     if (error.message === '此 API 账号已接入，请选择已有渠道账号。') return '此 API 账号已接入，请在“渠道账号”中选择已有账号，沿用同一标识。';
-    if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个渠道账号已关联原 API 客户端。要使用另一个客户端，请选择“接入新的渠道账号”。';
+    if (error.message === '这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。') return '这个渠道账号已关联原 API 客户端。要使用另一个客户端，请选择“新增渠道账号”。';
   }
   if (action === 'releases.prepare' && error instanceof Error) {
+    if (error.message === '应用尚未配置发布渠道，请先添加发布渠道') return error.message;
     if (error.message === 'all APKs must have the same package, version and signer') return '各渠道 APK 的包名、版本或签名不一致。请在“准备材料”中更换安装包后重新检查。';
     if (error.message === 'APK 包名与应用配置不一致') return 'APK 的 Android 包名与此应用不符。请确认应用选择和各渠道安装包。';
     if (error.message === 'debuggable APK cannot be published') return '选择的 APK 是调试包。请使用已签名的正式发布安装包。';

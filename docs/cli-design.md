@@ -18,7 +18,7 @@
 
 | 用户故事 | 完成标准 |
 | --- | --- |
-| 首次配置应用 | 引导填写应用名称、包名、渠道账号和商店应用信息，检查访问权限后保存。配置阶段无需 APK。 |
+| 首次配置应用 | 只填写应用名称和包名即可保存。之后为应用添加发布渠道，复用或新增账号，并分别验证应用访问权限。 |
 | 准备一次发布 | 选择应用，为各渠道指定 APK，输入或读取一份更新说明。工具校验产物并展示对应关系。 |
 | 确认提交范围 | 默认选择全部已配置渠道。材料或预检失败时先停止。用户明确选择跳过后，才缩小提交范围。 |
 | 提交应用更新 | 一次连续流程完成准备、检查、核对和提交。确认页覆盖应用、渠道、APK 和更新说明，用户确认一次。 |
@@ -34,14 +34,16 @@
 
 | 命令 | 用户任务 |
 | --- | --- |
-| `android-release app add [应用]` | 新建应用配置，逐渠道完成接入。 |
-| `android-release app edit [应用]` | 修改长期资料和渠道范围。已有发布记录保留原内容。 |
+| `android-release app add [应用]` | 保存应用名称和包名，发布渠道可以稍后添加。 |
+| `android-release app edit [应用]` | 修改应用名称和包名，保留已有渠道和发布内容。 |
+| `android-release app channels [应用]` | 添加或编辑当前应用的发布渠道；输入 `none` 可移除全部渠道。 |
 | `android-release app list` | 查看应用和已配置渠道。 |
 | `android-release publish [应用]` | 准备一次更新，或进入已有发布的继续流程。 |
 | `android-release status [应用]` | 查询最近一次发布，展示结果和下一步。 |
 | `android-release history [应用]` | 查看本机历史发布记录。 |
 | `android-release status [应用] --release <记录>` | 查询指定历史发布。 |
 | `android-release status [应用] --record-manual` | 引导核对商店后台，并保存人工核对记录。 |
+| `android-release account add [渠道] [账号]` | 独立添加账号和凭据，供多个应用复用。 |
 | `android-release account list` | 查看账号备注、凭据可用性和引用该账号的应用。 |
 | `android-release account update [渠道] [账号]` | 引导更新凭据，验证后保存。 |
 | `android-release account forget [渠道] [账号]` | 展示受影响的应用，清除本机保存的凭据及可复用授权材料。 |
@@ -67,7 +69,7 @@ android-release publish demo \
 
 ## 首次配置
 
-`app add` 收集应用名称、包名和渠道，再逐渠道配置商店应用标识与账号资料。向导解释字段来自商店后台的哪个位置。
+`app add` 收集应用名称和包名，保存后可暂不配置渠道。`app channels` 围绕当前应用选择商店，配置商店应用标识并选择账号。`account add` 可独立添加账号，也可在应用的渠道配置中快捷新增。向导解释字段来自商店后台的哪个位置。
 
 同一个真实渠道账号沿用同一个账号备注。已有账号可直接复用，避免为同一账号创建多份身份。向导读取已有默认值，并保留用户已经完成的配置。
 
@@ -141,7 +143,7 @@ vivo    已受理      上次：审核中      未确认            本次失败
 
 凭据内容以 AES-256-GCM 加密保存在本机私有目录。应用配置保存账号引用，短期令牌和上传授权保存在私有状态。每次保存生成独立密钥，由 macOS 钥匙串保护。密钥通过系统 `security` 的标准输入传递，凭据内容避开进程参数和普通日志。
 
-[Apple Keychain Services](https://developer.apple.com/documentation/security/keychain-services/) 提供加密存储。终端和 Web 输入均经同一套验证后保存，日常自动复用。更新时实际验证新凭据，清除凭据时保留未决请求与操作回执。
+[Apple Keychain Services](https://developer.apple.com/documentation/security/keychain-services/) 提供加密存储。终端和 Web 输入均经同一套验证后保存，日常自动复用。未关联应用时只检查凭据格式并加密保存，明确标注应用访问未验证。已关联应用时分别验证访问权限，至少一个应用通过后替换凭据，全部失败时保留旧凭据。清除凭据时保留未决请求与操作回执。
 
 APK 检查使用工具管理的 Eclipse Temurin 21.0.13+9 JRE 和官方 apksig 8.13.0。固定下载地址与 SHA256 校验值，安装和修复由工具负责。完整许可证与来源见[第三方声明](../THIRD_PARTY_NOTICES.md)。
 

@@ -7,7 +7,7 @@ import { readJSON, writePrivate } from '../private-file.js';
 export class WebWorkspace {
   constructor(private readonly root: string) {}
   private file(kind: unknown, id: unknown): string {
-    if (kind !== 'app' && kind !== 'release' || !validId(id)) throw new Error('invalid draft identity');
+    if (kind !== 'app' && kind !== 'app-details' && kind !== 'release' || !validId(id)) throw new Error('invalid draft identity');
     return path.join(this.root, 'web-drafts', String(kind), `${id}.json`);
   }
   get(kind: unknown, id: unknown): unknown {
@@ -29,7 +29,7 @@ export class WebWorkspace {
     if (fs.existsSync(file)) { readJSON(file, 512 * 1024, true); fs.unlinkSync(file); }
   }
   private validate(kind: unknown, value: unknown): void {
-    if (kind === 'app') {
+    if (kind === 'app' || kind === 'app-details') {
       assertObject(value, [], ['schema_version', 'project_id', 'display_name', 'package_name', 'channels']);
       if (value.schema_version !== undefined && value.schema_version !== 2) throw new Error('invalid draft schema');
       for (const field of ['project_id', 'display_name', 'package_name'])

@@ -6,7 +6,7 @@ import { channelAdapter } from './channels/index.js';
 import { protocols } from './channels/capabilities.js';
 import { type CredentialSet, type CredentialSource, CredentialInputError, resolveCredentialInput, validateCredentials } from './credentials.js';
 import { loadProject, prepare, preflight, previewBatch, publicError, reconcile, refresh, review, saveProject, submit, validateSubmission } from './engine.js';
-import { type Approval, type Batch, type Channel, type Project, type ProjectChannel, canonical, digest, isChannel, validClientId, validHash, validId, validPackage, validateProject } from './model.js';
+import { type AccountProfile, type Approval, type Batch, type Channel, type Project, type ProjectChannel, assertObject, canonical, digest, isChannel, validClientId, validHash, validId, validPackage, validateProject } from './model.js';
 import { dataRoot, hashFile, privateDir, readJSON, writePrivate } from './private-file.js';
 import { ensureRuntime, runtimeDiagnostic } from './runtime.js';
 import { type ManualObservation, Store } from './state.js';
@@ -211,10 +211,30 @@ export class PublisherApplication {
     return bindings;
   }
   private registerAccounts(rows: ProjectChannel[]): void {
-    for (const row of rows) writePrivate(path.join(this.root, 'account-profiles', `${digest([row.channel, row.account])}.json`),
-      JSON.stringify({ channel: row.channel, account: row.account, ...(row.client_id ? { client_id: row.client_id } : {}) }) + '\n', true, true);
+    const profiles = this.accountProfiles();
+    for (const row of rows) {
+      const clientId = row.client_id ?? profiles.find(item => item.channel === row.channel && item.account === row.account)?.client_id;
+      writePrivate(path.join(this.root, 'account-profiles', `${digest([row.channel, row.account])}.json`),
+        JSON.stringify({ channel: row.channel, account: row.account, ...(clientId ? { client_id: clientId } : {}) }) + '\n', true, true);
+    }
   }
-  private accountProfiles(): Array<{ channel: Channel; account: string; client_id?: string }> {
+  saveAccount(value: unknown): AccountProfile {
+    assertObject(value, ['channel', 'account'], ['client_id']);
+    if (!isChannel(value.channel) || !validId(value.account) ||
+      (value.channel !== 'huawei' || value.client_id !== undefined) && !validClientId(value.channel, value.client_id)) throw new Error('渠道账号资料格式无效');
+    const profile = value as unknown as AccountProfile;
+    const known = [...this.accountBindings().map(({ row }) => row), ...this.accountProfiles()];
+    for (const saved of known.filter(row => row.channel === profile.channel)) {
+      if (profile.client_id && profile.client_id === saved.client_id && profile.account !== saved.account)
+        throw new Error('此 API 账号已接入，请选择已有渠道账号。');
+      if (profile.account === saved.account && saved.client_id && profile.client_id !== saved.client_id)
+        throw new Error('这个渠道账号的 API 标识保持不变；使用另一个 API 客户端时，请接入新的渠道账号。');
+    }
+    writePrivate(path.join(this.root, 'account-profiles', `${digest([profile.channel, profile.account])}.json`),
+      JSON.stringify(profile) + '\n', true, true);
+    return profile;
+  }
+  private accountProfiles(): AccountProfile[] {
     const directory = path.join(this.root, 'account-profiles');
     if (!fs.existsSync(directory)) return [];
     return fs.readdirSync(directory).filter(name => /^[a-f0-9]{64}\.json$/.test(name)).flatMap(name => {
@@ -228,16 +248,23 @@ export class PublisherApplication {
   }
   async updateAccount(channel: Channel, account: string, credentials: CredentialSet): Promise<void> {
     validateCredentials(channel, credentials);
+    const profile = this.accounts().find(row => row.channel === channel && row.account === account);
+    if (!profile) throw new CredentialInputError('account');
     const bindings = this.accountBindings().filter(({ row }) => row.channel === channel && row.account === account);
-    if (!bindings.length) throw new Error('账号尚未关联应用，请先运行 android-release app add');
-    for (const clientId of new Set(bindings.map(({ row }) => row.client_id ?? row.account))) this.store.invalidateAccountToken(channel, account, clientId);
-    for (const { app, row } of bindings) await this.checkChannel(app, row, credentials);
+    for (const clientId of new Set([profile.client_id ?? account, ...bindings.map(({ row }) => row.client_id ?? row.account)])) this.store.invalidateAccountToken(channel, account, clientId);
+    const checked = [];
+    let failure: unknown;
+    for (const binding of bindings) {
+      try { await this.checkChannel(binding.app, binding.row, credentials); checked.push({ ...binding, connected: true }); }
+      catch (error) { failure ??= error; checked.push({ ...binding, connected: false }); }
+    }
+    if (checked.length && !checked.some(row => row.connected)) throw failure;
     this.vault.save(channel, account, credentials);
-    for (const { app, row, current } of bindings) if (current) this.saveConnection(app, row, true);
+    for (const { app, row, current, connected } of checked) if (current) this.saveConnection(app, row, connected);
   }
   async updateAccountFromInput(channel: unknown, account: unknown, raw?: unknown, files?: unknown): Promise<void> {
     if (!isChannel(channel) || !validId(account)) throw new CredentialInputError('input');
-    if (!this.accounts().some(row => row.channel === channel && row.account === account && row.apps.length)) throw new CredentialInputError('account');
+    if (!this.accounts().some(row => row.channel === channel && row.account === account)) throw new CredentialInputError('account');
     const credentials = resolveCredentialInput(channel, raw, files);
     try { await this.updateAccount(channel, account, credentials); }
     finally { for (const field of Object.keys(credentials)) delete credentials[field]; }
@@ -265,6 +292,7 @@ export class PublisherApplication {
   async prepareRelease(input: PrepareReleaseInput): Promise<{ release: ReleaseView; duplicate: boolean; related_release?: string }> {
     const app = this.app(input.app_id);
     const selected = input.channels ?? app.channels.map(row => row.channel);
+    if (!app.channels.length) throw new Error('应用尚未配置发布渠道，请先添加发布渠道');
     if (!Array.isArray(selected) || !selected.length || new Set(selected).size !== selected.length ||
       selected.some(channel => !isChannel(channel) || !app.channels.some(row => row.channel === channel))) throw new Error('请选择已配置的渠道');
     if (!input.apks || typeof input.apks !== 'object' || Array.isArray(input.apks) ||
@@ -383,6 +411,7 @@ export class PublisherApplication {
         note: typeof p.note === 'string' ? p.note : '',
       }) };
       case 'accounts.list': return { accounts: this.accounts() };
+      case 'accounts.save': return { account: this.saveAccount(p.account) };
       case 'accounts.update':
         if (Object.keys(p).some(key => !['channel', 'account', 'credentials', 'files'].includes(key))) throw new CredentialInputError('input');
         await this.updateAccountFromInput(p.channel, p.account, p.credentials, p.files);

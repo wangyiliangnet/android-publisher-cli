@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { setGlobalProxyFromEnv } from 'node:http';
 import { PublisherApplication, type ReleaseView } from './application.js';
-import { PromptCredentials } from './credentials.js';
+import { type CredentialSource, PromptCredentials } from './credentials.js';
 import { publicError } from './engine.js';
 import { type Channel, CHANNELS, isChannel, validId } from './model.js';
 import { dataRoot, regularFile } from './private-file.js';
 import { protocols, protocolsText } from './channels/capabilities.js';
-import { configureProject, channelNames } from './setup.js';
+import { configureAccount, configureApp, configureProject, channelNames } from './setup.js';
 import { ensureRuntime, runtimeDiagnostic } from './runtime.js';
 import { startWebServer } from './web.js';
 
@@ -124,13 +124,13 @@ export function releaseText(release: ReleaseView): string {
   return lines.join('\n') + '\n';
 }
 function help(context = ''): string {
-  const intro = 'Android 发布工具：配置应用 → 指定渠道包 → 确认发布 → 查询结果\n\n';
+  const intro = 'Android 发布工具：创建应用 → 添加发布渠道 → 确认发布 → 查询结果\n\n';
   const descriptions: Record<string, string> = {
-    app: 'android-release app add [应用]\nandroid-release app edit [应用]\nandroid-release app list [--json]\n\n配置长期应用资料和渠道账号，首次配置无需 APK。\n',
+    app: 'android-release app add [应用]\nandroid-release app edit [应用]\nandroid-release app channels [应用]\nandroid-release app list [--json]\n\napp add/edit 保存应用名称和包名；app channels 添加或编辑该应用的发布渠道。首次创建无需 APK 或渠道账号。\n',
     publish: 'android-release publish [应用] [--channels huawei,honor] [--apk huawei=/绝对路径/one.apk] [--notes-file /绝对路径/notes.txt]\n\n默认全部已配置渠道，逐渠道明确指定 APK。工具检查材料与渠道，展示摘要，确认一次后提交。再次进入可继续已有发布。\n',
     status: 'android-release status [应用] [--release 记录] [--cached] [--json] [--record-manual] [--reconcile]\n\n默认查询最近一次发布。--cached 只读本机记录；--record-manual 记录人工核对；--reconcile 只读取能够核对未决请求的远端证据。\n',
     history: 'android-release history [应用] [--json]\n\n查看本机发布历史，不访问商店。\n',
-    account: 'android-release account list [--json]\nandroid-release account update [渠道] [账号]\nandroid-release account forget [渠道] [账号]\n\n密钥经终端隐藏输入，本机安全复用。JSON 和 PEM 材料要求当前用户所有、权限 0600。\n',
+    account: 'android-release account add [渠道] [账号]\nandroid-release account list [--json]\nandroid-release account update [渠道] [账号]\nandroid-release account forget [渠道] [账号]\n\n密钥经终端隐藏输入，本机安全复用。JSON 和 PEM 材料要求当前用户所有、权限 0600。\n',
     doctor: 'android-release doctor [--repair] [--json]\n\n检查工具自带组件。--repair 自动安装固定版本的 APK 校验组件，无需手动配置 Android SDK 或 JDK。\n',
     web: 'android-release web [--port 端口] [--no-open]\n\n启动仅监听 127.0.0.1 的本地 Web 端，与 CLI 共用应用、账号和发布记录。\n',
     protocols: 'android-release protocols [--json]\n\n查看渠道查询、核对能力和真实验证范围。\n',
@@ -146,7 +146,7 @@ function resultCode(release: ReleaseView, errors: Record<string, string>, select
   return targets.some(row => row.execution_phase === 'submitted') ? 2 : Object.keys(errors).length ? 1 : 1;
 }
 
-export async function run(args: string[], injected: { application?: PublisherApplication; terminal?: TerminalIO; output?: (text: string) => void } = {}): Promise<number> {
+export async function run(args: string[], injected: { application?: PublisherApplication; terminal?: TerminalIO; output?: (text: string) => void; credentials?: CredentialSource } = {}): Promise<number> {
   const out = injected.output ?? (text => process.stdout.write(text));
   const io = injected.terminal ?? new Terminal();
   let app = injected.application;
@@ -187,50 +187,61 @@ export async function run(args: string[], injected: { application?: PublisherApp
     if (command === 'app') {
       const action = args[1];
       if (action === 'list') { allow(flags, ['json']); const apps = application().apps(); if (flags.json) json({ apps }); else out(apps.length ? table([['应用', '短名', '包名', '渠道'], ...apps.map(row => [row.display_name ?? row.project_id, row.project_id, row.package_name ?? '', row.channels.map(target => channelNames[target.channel]).join('、')])]) : '尚未配置应用。运行 android-release app add 开始。\n'); return 0; }
-      if (!['add', 'edit'].includes(action ?? '')) throw new Error('使用 app add、app edit 或 app list');
+      if (!['add', 'edit', 'channels'].includes(action ?? '')) throw new Error('使用 app add、app edit、app channels 或 app list');
       allow(flags, []);
-      const id = action === 'edit' ? await chooseApp(positional[0]) : positional[0] ?? await io.ask('应用短名（供命令行选择，使用字母、数字、点、横线或下划线）');
+      const id = action !== 'add' ? await chooseApp(positional[0]) : positional[0] ?? await io.ask('应用短名（供命令行选择，使用字母、数字、点、横线或下划线）');
       if (!validId(id)) throw new Error('应用配置名无效');
       const previous = application().apps().find(row => row.project_id === id);
       if (action === 'add' && previous) throw new Error('应用已存在，请使用 app edit');
-      const project = await configureProject(id, io, previous);
-      application().saveApp(project, action === 'edit');
-      const prompt = new PromptCredentials();
-      for (const row of project.channels) {
-        if (application().vault.has(row.channel, row.account)) continue;
-        io.write(`连接${channelNames[row.channel]}：凭据仅在此终端输入，验证后安全保存。\n`); io.suspend();
-        try { await application().updateAccount(row.channel, row.account, await prompt.forChannel(row.channel)); }
-        catch (error) {
-          if (/canceled|取消/.test(publicError(error))) throw new Canceled();
-          io.write(`${channelNames[row.channel]}：${publicError(error)}\n修复：android-release account update ${row.channel} ${row.account}\n`);
-        }
+      const project = action === 'channels'
+        ? await configureProject(id, io, previous, { accounts: application().accounts(), channelsOnly: true })
+        : await configureApp(id, io, previous);
+      application().saveApp(project, action !== 'add');
+      if (action !== 'channels' || !project.channels.length) {
+        out(`应用 ${id} 已保存。${project.channels.length ? '' : '尚未配置发布渠道。'}添加或编辑发布渠道：android-release app channels ${id}\n`);
+        return 0;
       }
-      prompt.clear();
+      const prompt = new PromptCredentials();
+      try {
+        for (const row of project.channels) {
+          if (application().vault.has(row.channel, row.account)) continue;
+          io.write(`连接${channelNames[row.channel]}：凭据仅在此终端输入，验证后安全保存。\n`); io.suspend();
+          try { await application().updateAccount(row.channel, row.account, await (injected.credentials ?? prompt).forChannel(row.channel)); }
+          catch (error) {
+            if (/canceled|取消/.test(publicError(error))) throw new Canceled();
+            io.write(`${channelNames[row.channel]}：${publicError(error)}\n修复：android-release account update ${row.channel} ${row.account}\n`);
+          }
+        }
+      } finally { prompt.clear(); }
       const checked = await application().checkApp(id); errorsText(checked.errors);
       out(`应用 ${id} 已保存。发布：android-release publish ${id}\n`);
       return Object.keys(checked.errors).length ? 1 : 0;
     }
     if (command === 'account') {
       const action = args[1];
-      if (action === 'list') { allow(flags, ['json']); const accounts = application().accounts(); if (flags.json) json({ accounts }); else out(accounts.length ? table([['渠道', '账号备注', '凭据', '应用'], ...accounts.map(row => [channelNames[row.channel], row.account, row.saved ? '已保存' : '待配置', row.app_names.join('、') || '暂未关联应用'])]) : '尚无渠道账号。先运行 android-release app add。\n'); return 0; }
+      if (action === 'list') { allow(flags, ['json']); const accounts = application().accounts(); if (flags.json) json({ accounts }); else out(accounts.length ? table([['渠道', '账号备注', '凭据', '应用'], ...accounts.map(row => [channelNames[row.channel], row.account, row.saved ? '已保存' : '待配置', row.app_names.join('、') || '暂未关联应用'])]) : '尚无渠道账号。运行 android-release account add 添加。\n'); return 0; }
       allow(flags, []);
-      if (!['update', 'forget'].includes(action ?? '') || positional.length > 2) throw new Error('使用 account list、account update 或 account forget');
+      if (!['add', 'update', 'forget'].includes(action ?? '') || positional.length > 2) throw new Error('使用 account add、account list、account update 或 account forget');
       const channel = positional[0] ?? await io.ask('渠道', CHANNELS[0]);
       if (!isChannel(channel)) throw new Error('未知渠道');
       const accounts = application().accounts().filter(row => row.channel === channel);
-      const account = positional[1] ?? (accounts.length === 1 ? accounts[0]!.account : await io.ask('账号备注'));
-      const selected = accounts.find(row => row.account === account);
-      if (!selected) throw new Error('账号尚未关联应用');
+      const account = positional[1] ?? (action !== 'add' && accounts.length === 1 ? accounts[0]!.account : await io.ask('账号备注', action === 'add' ? channel + '-main' : ''));
+      let selected = accounts.find(row => row.account === account);
+      if (action === 'add') {
+        if (selected) throw new Error('渠道账号已存在，请使用 account update 更新凭据');
+        application().saveAccount(await configureAccount(channel, account, io));
+        selected = application().accounts().find(row => row.channel === channel && row.account === account);
+      }
+      if (!selected) throw new Error('渠道账号不存在，请先运行 android-release account add');
       if (action === 'forget') {
         io.write(`将清除 ${channelNames[channel]} / ${account} 的本机凭据。${selected.apps.length ? '受影响应用：' + selected.app_names.join('、') : '目前没有应用关联'}。发布回执和未决请求记录会保留。\n`);
         if (await io.ask('输入 yes 清除') !== 'yes') throw new Canceled();
         application().forgetAccount(channel, account); out('本机凭据已清除。\n'); return 0;
       }
-      if (!selected.apps.length) throw new Error('这个账号暂未关联应用。请先在应用资料中选择此渠道账号，再验证和更新凭据。');
       io.suspend(); const prompt = new PromptCredentials();
-      try { await application().updateAccount(channel, account, await prompt.forChannel(channel)); }
+      try { await application().updateAccount(channel, account, await (injected.credentials ?? prompt).forChannel(channel)); }
       finally { prompt.clear(); }
-      out('凭据已验证并安全保存。\n'); return 0;
+      out(selected.apps.length ? '凭据已验证并安全保存。\n' : '凭据已安全保存，尚未验证应用访问。请在应用中添加发布渠道并验证权限。\n'); return 0;
     }
     if (command === 'web') {
       allow(flags, ['port', 'no-open']);
@@ -298,6 +309,7 @@ export async function run(args: string[], injected: { application?: PublisherApp
         else if (action !== 'new') throw new Canceled();
       }
       if (!release) {
+        if (!config.channels.length) throw new Error(`应用尚未配置发布渠道。请运行 android-release app channels ${id}`);
         const apks: Partial<Record<Channel, string>> = {};
         for (const entry of flags.apk as string[] ?? []) {
           const sep = entry.indexOf('='); const channel = entry.slice(0, sep);

@@ -20,7 +20,7 @@ const credentialIssues = {
   fields: '凭据字段缺失、重复或不属于该渠道，请检查输入方式。',
   file: '无法读取私有材料。请使用属于当前用户、权限为 0600 的本机绝对文件路径，或直接粘贴材料内容。',
   format: '凭据材料格式无效，请检查密钥及 JSON/PEM 内容。',
-  account: '账号尚未关联应用，请先配置应用和渠道账号资料。',
+  account: '渠道账号不存在，请先添加渠道账号或选择已有账号。',
 } as const;
 export class CredentialInputError extends Error {
   readonly code: keyof typeof credentialIssues;

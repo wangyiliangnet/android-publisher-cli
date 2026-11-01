@@ -32,6 +32,7 @@ function model(initial = 'ready') {
       for (const row of payload.app.channels) { let account = state.accounts.find(item => item.channel === row.channel && item.account === row.account); if (!account) { account = { channel: row.channel, account: row.account, client_id: row.client_id, apps: [], saved: false }; state.accounts.push(account); } if (!account.apps.includes(payload.app.project_id)) account.apps.push(payload.app.project_id); }
       return { app: payload.app };
     }
+    if (action === 'accounts.save') { state.accounts.push({ ...clone(payload.account), apps: [], saved: false }); return { account: payload.account }; }
     if (action === 'accounts.list') return { accounts: state.accounts.map(row => ({ ...row, app_names: row.apps.map(id => state.apps.find(app => app.project_id === id)?.display_name || id) })) };
     if (action === 'accounts.update') { state.credentialInputs.push(clone(payload)); const account = state.accounts.find(row => row.channel === payload.channel && row.account === payload.account); account.saved = true; for (const appId of account.apps) state.connected.add(appId + ':' + account.channel); return { updated: true }; }
     if (action === 'accounts.forget') { state.accounts.find(row => row.channel === payload.channel && row.account === payload.account).saved = false; return { forgotten: true }; }
@@ -86,10 +87,14 @@ test('Web app onboarding keeps Chinese names, interrupted progress, and reusable
   await page.getByRole('link', { name: '添加应用', exact: true }).first().click();
   await page.getByLabel('应用名称', { exact: true }).fill('阅读助手');
   await page.getByLabel('Android 包名', { exact: true }).fill('com.example.reader');
-  await page.getByRole('button', { name: /下一步：选择商店/ }).click();
+  await page.getByRole('button', { name: '创建应用', exact: true }).click();
+  await page.getByRole('heading', { name: '阅读助手', exact: true }).waitFor();
+  assert.deepEqual(state.apps[0].channels, []);
+  assert.equal(state.accounts.length, 1);
+  await page.getByRole('link', { name: '添加发布渠道', exact: true }).first().click();
   await page.locator('[data-setup-select=huawei]').check();
   await page.locator('[data-setup-select=honor]').check();
-  await page.getByRole('button', { name: /下一步：接入渠道账号/ }).click();
+  await page.getByRole('button', { name: /下一步：配置应用与账号/ }).click();
   await page.locator('#channel-app_id').fill('10001');
   await page.getByRole('button', { name: '保存资料并接入华为凭据', exact: true }).click();
   assert.equal(await page.locator('#credential-mode-service_account_json').inputValue(), 'text');
@@ -383,7 +388,7 @@ test('Web repairs the original account and retries only a failed channel while a
 test('Web removes a configured channel only after an explicit confirmation and keeps prior release records', options, async t => {
   const { state, backend, web, page, errors } = await fixture(t);
   await backend.invoke('releases.prepare', { app_id: 'reader', channels: ['huawei', 'tencent'], apks: { huawei: '/private/synthetic/h.apk', tencent: '/private/synthetic/t.apk' }, release_notes: '旧记录的材料保持不变。' });
-  await page.goto(web.url + '/#/setup/reader');
+  await page.goto(web.url + '/#/setup/reader?channels=1');
   await page.getByRole('button', { name: '返回选择商店', exact: true }).click();
   await page.getByText('管理已配置的渠道', { exact: true }).click();
   const dialog = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /只影响以后的发布，已有记录和本机凭据会保留/); await event.accept(); resolve(); }));
@@ -394,9 +399,15 @@ test('Web removes a configured channel only after an explicit confirmation and k
   assert.equal(state.releases[0].targets.length, 2);
   assert.equal(state.accounts.find(row => row.channel === 'tencent').saved, true);
   await page.getByText('管理已配置的渠道', { exact: true }).click();
+  page.once('dialog', event => event.accept());
   await page.getByRole('button', { name: '移除华为渠道', exact: true }).click();
-  await page.getByText('应用至少保留一个渠道，接入其它渠道后再移除。', { exact: true }).waitFor();
-  assert.equal(state.apps[0].channels.length, 1);
+  await page.getByText('渠道已移除，已有发布记录仍保留。', { exact: true }).waitFor();
+  assert.equal(state.apps[0].channels.length, 0);
+  assert.equal(state.releases[0].targets.length, 2);
+  await page.getByRole('link', { name: '返回应用', exact: true }).click();
+  await page.getByRole('heading', { name: '阅读助手', exact: true }).waitFor();
+  await page.getByText('尚未配置发布渠道。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: /发新版本/ }).count(), 0);
   assert.deepEqual(errors, []);
 });
 

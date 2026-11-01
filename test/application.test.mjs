@@ -56,6 +56,71 @@ function fixture(t, { lost = false, honor = false } = {}) {
   return { root, app, calls, apks, input, vault, seenCredentials };
 }
 
+test('applications and publishing accounts can be created independently and survive removing the final channel', async t => {
+  const f = fixture(t);
+  const profile = { channel: 'honor', account: 'shared-honor', client_id: 'shared-client' };
+  assert.deepEqual(await f.app.invoke('accounts.save', { account: profile }), { account: profile });
+  await f.app.updateAccountFromInput('honor', profile.account, { client_secret: 'synthetic-independent-secret' });
+  assert.deepEqual(f.app.accounts().find(row => row.account === profile.account).apps, []);
+  assert.equal(f.vault.has('honor', profile.account), true);
+  assert.deepEqual(f.calls, []);
+  for (const id of ['first', 'second']) {
+    f.app.saveApp({ schema_version: 2, project_id: id, display_name: id, package_name: 'com.example.app', channels: [] });
+    assert.deepEqual(f.app.appOverviews().find(row => row.app_id === id).channels, []);
+  }
+  await assert.rejects(f.app.prepareRelease({ app_id: 'first', apks: {}, release_notes: 'Synthetic notes' }), /尚未配置发布渠道/);
+  for (const id of ['first', 'second']) f.app.saveApp({ ...f.app.app(id), channels: [{ ...profile, app_id: '123' }] }, true);
+  assert.equal(f.app.appOverviews().find(row => row.app_id === 'first').channels[0].connected, false);
+  await f.app.checkApp('first');
+  assert.equal(f.app.appOverviews().find(row => row.app_id === 'first').channels[0].connected, true);
+  assert.equal(f.app.appOverviews().find(row => row.app_id === 'second').channels[0].connected, false);
+  assert.throws(() => f.app.saveAccount({ ...profile, account: 'alias' }), /选择已有渠道账号/);
+  assert.throws(() => f.app.saveAccount({ ...profile, client_id: 'different-client' }), /API 标识保持不变/);
+  assert.throws(() => f.app.saveAccount({ ...profile, credentials: 'synthetic' }), /unexpected/);
+  for (const id of ['first', 'second']) f.app.saveApp({ ...f.app.app(id), channels: [] }, true);
+  const restarted = new PublisherApplication({ root: f.root, vault: f.vault });
+  try {
+    assert.deepEqual(restarted.app('first').channels, []);
+    assert.deepEqual(restarted.accounts().find(row => row.account === profile.account).apps, []);
+    assert.equal(restarted.accounts().find(row => row.account === profile.account).saved, true);
+    await restarted.updateAccountFromInput('honor', profile.account, { client_secret: 'synthetic-replacement' });
+    assert.equal(f.vault.get('honor', profile.account).client_secret, 'synthetic-replacement');
+  } finally { restarted.close(); }
+});
+
+test('shared account credential updates record access separately when one application rejects access', async t => {
+  const f = fixture(t);
+  f.app.saveApp({ schema_version: 2, project_id: 'other', package_name: 'com.example.denied', channels: [
+    { channel: 'tencent', account: 'tencent-main', app_id: '789', client_id: 'example-user' },
+  ] });
+  await f.app.updateAccount('tencent', 'tencent-main', { api_secret: 'synthetic-new-secret' });
+  assert.equal(f.vault.get('tencent', 'tencent-main').api_secret, 'synthetic-new-secret');
+  const overviews = f.app.appOverviews();
+  assert.equal(overviews.find(row => row.app_id === 'demo').channels[0].connected, true);
+  assert.equal(overviews.find(row => row.app_id === 'other').channels[0].connected, false);
+  assert.match(overviews.find(row => row.app_id === 'other').channels[0].issue, /验证未通过/);
+});
+
+test('CLI creates an application without channels and reuses an independently created account', async t => {
+  const f = fixture(t), output = [], messages = [];
+  const terminal = answers => ({ ask: async label => { assert.ok(answers.length, label); return answers.shift(); },
+    write: value => messages.push(value), close() {}, suspend() {}, multiline: async () => '' });
+  assert.equal(await run(['app', 'add', 'reader'], { application: f.app, terminal: terminal(['阅读助手', 'com.example.app', 'yes']), output: value => output.push(value) }), 0);
+  assert.deepEqual(f.app.app('reader').channels, []);
+  assert.deepEqual(f.calls, []);
+  assert.equal(await run(['account', 'add', 'honor', 'shared-honor'], { application: f.app, terminal: terminal(['shared-client']),
+    credentials: { forChannel: async () => ({ client_secret: 'synthetic' }) }, output: value => output.push(value) }), 0);
+  assert.match(output.join(''), /尚未验证应用访问/);
+  assert.deepEqual(f.calls, []);
+  assert.equal(await run(['app', 'channels', 'reader'], { application: f.app,
+    terminal: terminal(['honor', 'shared-honor', '123', 'yes']), output: value => output.push(value) }), 0);
+  assert.deepEqual(f.app.app('reader').channels, [{ channel: 'honor', account: 'shared-honor', app_id: '123', client_id: 'shared-client' }]);
+  assert.equal(await run(['app', 'channels', 'reader'], { application: f.app,
+    terminal: terminal(['none', 'yes']), output: value => output.push(value) }), 0);
+  assert.deepEqual(f.app.app('reader').channels, []);
+  assert.equal(f.vault.has('honor', 'shared-honor'), true);
+});
+
 test('application setup and explicit subset preparation are offline and freeze only selected packages', async t => {
   const f = fixture(t, { honor: true });
   assert.deepEqual(f.calls, []);
