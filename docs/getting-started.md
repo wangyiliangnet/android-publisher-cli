@@ -23,7 +23,7 @@ android-release doctor
 android-release doctor --json
 ```
 
-浏览器工作台的“环境诊断”页也提供“安装 / 修复检查组件”，并展示版本、Node.js、平台和 CPU 架构。
+浏览器工作台的“环境检查”页也提供“安装或修复检查组件”，并展示版本、Node.js、平台和 CPU 架构。
 
 普通 `doctor` 只读取本机状态。`--repair` 需要联网下载检查组件。下载失败或完整性校验不通过时停止安装，修复网络后重试。工具使用环境中的 HTTP/HTTPS 代理设置，遵循 `NO_PROXY`。
 
@@ -36,7 +36,7 @@ android-release app add demo
 android-release web
 ```
 
-先填写应用名称和包名，再从 Web 应用主页添加发布渠道，或运行 `android-release app channels demo`。渠道账号也可独立添加并复用。首次配置无需选择 APK。浏览器工作台与 CLI 共用本机记录。服务仅监听本机地址。在“账号与凭据”中直接接入或更新密钥，也能使用终端录入。两端共用同一份安全存储。
+先填写应用名称和包名，再从 Web 应用主页添加发布渠道，或运行 `android-release app channels demo`。渠道账号也可独立添加并复用。首次配置无需选择 APK。浏览器工作台与 CLI 共用本机记录。服务仅监听本机地址。在“渠道账号”中直接接入或更新密钥，也能使用终端录入。两端共用同一份安全存储。
 
 更新和卸载仍使用 npm。卸载包会保留本机应用、发布记录、加密凭据和检查组件。渠道密钥可先用 `account forget` 清除。
 

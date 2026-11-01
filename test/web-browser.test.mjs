@@ -146,12 +146,12 @@ test('Web credential entry preserves multiline materials and clears every comple
   await page.locator('#credential-client_secret').fill('synthetic-navigation-F9');
   const navigated = await page.locator('#credentials-form').elementHandle();
   await page.evaluate(() => { location.hash = '#/doctor'; });
-  await page.getByRole('heading', { name: '本机检查', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '环境检查', exact: true }).waitFor();
   assert.equal(await empty(navigated), true); await navigated.dispose();
   await page.getByText('版本与运行信息', { exact: true }).click();
   await page.getByText('0.0.0-test', { exact: true }).waitFor();
   await page.getByRole('button', { name: '安装或修复检查组件', exact: false }).click();
-  await page.getByText('本机检查通过，可以检查安装包。').waitFor();
+  await page.getByText('环境检查通过，可以检查安装包。').waitFor();
   assert.equal(repairs, 1);
 
   await page.goto(web.url + '/#/accounts'); await open('honor');
