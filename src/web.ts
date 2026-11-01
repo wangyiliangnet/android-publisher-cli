@@ -23,7 +23,7 @@ const actions = new Set(['apps.list', 'apps.save', 'apps.check', 'releases.list'
 const maxUpload = 1024 * 1024 * 1024;
 const maxJSON = 1024 * 1024;
 const actionErrors: Record<string, string> = {
-  'apps.save': '应用资料未保存。请检查名称、Android 包名和各渠道的商店应用资料。已填写内容保留在本机草稿中。',
+  'apps.save': '应用资料未保存。请检查名称、Android 包名和各渠道的商店应用资料。已填写内容保留在本地草稿中。',
   'apps.check': '渠道访问验证未完成。应用资料已保留，请检查该渠道的账号、商店应用资料或网络后重新验证。',
   'releases.prepare': '发布材料准备未完成。请检查各渠道 APK 的包名、版本和签名是否一致，更新说明是否符合限制，并查看“环境检查”。',
   'releases.preflight': '渠道检查未完成。APK 和更新说明已保留，尚未提交。请检查账号访问权限或网络后重新检查。',
@@ -32,13 +32,13 @@ const actionErrors: Record<string, string> = {
   'releases.get': '本次查询未能更新结果。已保存的进度仍保留，请检查网络或渠道账号权限后重新查询。',
   'releases.manual': '人工核对记录未保存。请检查渠道、核对来源和核对时间，再重新保存。',
   'releases.reconcile': '提交结果检查未完成。原请求记录已保留，请检查网络或渠道账号权限后重新检查。',
-  'accounts.forget': '本机凭据清除未完成。请解锁钥匙串后重试，原发布记录和请求回执仍保留。',
+  'accounts.forget': '本地凭据清除未完成。请解锁钥匙串后重试，原发布记录和请求回执仍保留。',
   'accounts.save': '渠道账号未保存。请检查渠道、账号备注和 API 接入标识，并核对是否已有同一账号。',
   'accounts.update': '凭据更新未完成。请核对材料、账号权限、网络与钥匙串状态，并查看当前账号状态；存在未决令牌请求时，须先核对原请求。',
-  'doctor.repair': '检查组件安装或修复未完成。请检查网络和本机目录权限后重试。',
-  'drafts.get': '本机草稿未能读取。请保留现有资料，检查本机目录权限。',
-  'drafts.save': '草稿尚未保存。请保留当前页面，检查本机目录权限后重试。',
-  'drafts.clear': '本机草稿未能清除。已提交的发布记录仍保留。',
+  'doctor.repair': '检查组件安装或修复未完成。请检查网络和本地目录权限后重试。',
+  'drafts.get': '本地草稿未能读取。请保留现有资料，检查本地目录权限。',
+  'drafts.save': '草稿尚未保存。请保留当前页面，检查本地目录权限后重试。',
+  'drafts.clear': '本地草稿未能清除。已提交的发布记录仍保留。',
   'jobs.start': '操作未能开始。请先查看当前任务，再重试。',
   'jobs.get': '未找到此操作。请返回应用查看已保存的发布进度。',
 };
@@ -191,7 +191,7 @@ export async function startWebServer(backend: WebBackend, options: { port?: numb
     headers(response);
     let activeAction = '';
     void (async () => {
-      if (request.headers.host !== expectedHost) throw new RequestError(403, '仅允许从本机页面访问。');
+      if (request.headers.host !== expectedHost) throw new RequestError(403, '请通过服务启动时显示的本地地址访问。');
       if (request.headers['sec-fetch-site'] === 'cross-site') throw new RequestError(403, '不允许跨站访问。');
       const requested = new URL(request.url ?? '/', origin);
       if (request.method === 'GET') {

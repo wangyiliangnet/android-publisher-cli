@@ -86,7 +86,7 @@ export async function configureProject(projectId: string, io: SetupIO, previous?
     } while (!validPackage(packageName));
   }
   const rows: ProjectChannel[] = [];
-  io.write('\n账号备注由你命名，用来区分本机保存的渠道账号；同一渠道账号请始终使用同一备注。只有一个账号时直接回车。\n');
+  io.write('\n账号备注由你命名，用来区分本地保存的渠道账号；同一渠道账号请始终使用同一备注。只有一个账号时直接回车。\n');
   for (const channel of selection) {
     const saved = previous?.channels.find(row => row.channel === channel);
     io.write(`\n${channelNames[channel]}（${channel}）\n`);

@@ -391,7 +391,7 @@ test('Web removes a configured channel only after an explicit confirmation and k
   await page.goto(web.url + '/#/setup/reader?channels=1');
   await page.getByRole('button', { name: '返回选择商店', exact: true }).click();
   await page.getByText('管理已配置的渠道', { exact: true }).click();
-  const dialog = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /只影响以后的发布，已有记录和本机凭据会保留/); await event.accept(); resolve(); }));
+  const dialog = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /只影响以后的发布，已有记录和本地凭据会保留/); await event.accept(); resolve(); }));
   await page.getByRole('button', { name: '移除应用宝渠道', exact: true }).click();
   await dialog;
   await page.getByText('渠道已移除，已有发布记录仍保留。', { exact: true }).waitFor();
@@ -422,7 +422,7 @@ test('Web starts another application explicitly without erasing an application a
   }, { ...state.apps[0], channels: [...state.apps[0].channels, { channel: 'honor', account: 'honor-new', app_id: '', client_id: '' }] });
   await page.goto(web.url + '/#/setup/new');
   await page.getByRole('button', { name: '重新添加另一个应用', exact: true }).waitFor();
-  const confirmed = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /已经保存的应用、渠道和本机凭据会保留/); await event.accept(); resolve(); }));
+  const confirmed = new Promise(resolve => page.once('dialog', async event => { assert.match(event.message(), /已经保存的应用、渠道和本地凭据会保留/); await event.accept(); resolve(); }));
   await page.getByRole('button', { name: '重新添加另一个应用', exact: true }).click();
   await confirmed;
   await page.getByLabel('应用名称', { exact: true }).waitFor();

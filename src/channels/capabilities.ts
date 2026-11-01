@@ -39,7 +39,7 @@ export function protocolsText(): string {
       `${capability.availability_query ? '支持' : '后台核对'} | ${capability.release_notes_max} 字符 |`);
   }
   rows.push('', ...CHANNELS.map(channel => `${channelCapabilities[channel].name}：${channelCapabilities[channel].query_note}`),
-    '', '查询仅在本机已有本次受理记录且远端结果关联本次版本时确认状态。',
+    '', '查询仅在本地已有本次受理记录且远端结果关联本次版本时确认状态。',
     '六渠道均不能自动核对响应丢失的写入；结果未决时继续阻塞冲突发布。');
   return `${rows.join('\n')}\n`;
 }

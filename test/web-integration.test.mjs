@@ -121,7 +121,7 @@ test('browser follows a real shared release across navigation without another su
   await page.getByRole('button', { name: '发新版本', exact: true }).click();
   await page.locator('input[type="file"][accept*=".apk"]').first().setInputFiles({ name: 'synthetic.apk', mimeType: 'application/vnd.android.package-archive', buffer: Buffer.from('synthetic APK content') });
   await page.getByLabel(/更新说明/).first().fill('改进阅读体验，修复已知问题。 <b data-reader-note>说明原文</b>');
-  await page.getByText('已自动保存到本机', { exact: true }).waitFor();
+  await page.getByText('已自动保存到本地', { exact: true }).waitFor();
   await page.reload();
   assert.equal(await page.getByLabel(/更新说明/).first().inputValue(), '改进阅读体验，修复已知问题。 <b data-reader-note>说明原文</b>');
   assert.match(await page.locator('main').innerText(), /synthetic\.apk/);
@@ -234,7 +234,7 @@ test('Web independently creates accounts and applications, reuses credentials, a
   await page.locator('[data-setup-select=honor]').check();
   await page.getByRole('button', { name: /下一步：配置应用与账号/ }).click();
   await page.locator('#channel-app_id').fill('20001');
-  await page.getByText('已自动保存到本机', { exact: true }).waitFor();
+  await page.getByText('已自动保存到本地', { exact: true }).waitFor();
   await page.goto(web.url + '/#/setup/' + reader.project_id);
   await page.getByLabel('应用名称', { exact: true }).fill('阅读助手新版名称');
   await page.getByRole('button', { name: '保存应用资料', exact: true }).click();

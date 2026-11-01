@@ -35,7 +35,7 @@ test('private credential paths use the same owner, mode and symlink checks as CL
   } finally {process.getuid=getuid;}
   const alias=path.join(root,'alias.json');fs.symlinkSync(file,alias);
   assert.throws(() => resolveCredentialInput('huawei', {}, { service_account_json: alias }), /0600/);
-  assert.throws(() => resolveCredentialInput('huawei', {}, { service_account_json: 'relative.json' }), /绝对文件路径/);
+  assert.throws(() => resolveCredentialInput('huawei', {}, { service_account_json: 'relative.json' }), /绝对路径/);
 });
 test('mixed text and private-file inputs support optional Xiaomi test accounts and reject ambiguity', t => {
   const root = fixture(t), pem=path.join(root,'synthetic.pem'), json=path.join(root,'synthetic.json');

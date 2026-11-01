@@ -6,7 +6,7 @@ android-release status demo --cached
 android-release history demo
 ```
 
-默认刷新应用最近一次发布。`--cached` 只读本机记录，适合离线或中断后先查看进度。查看历史版本时，用 `--release` 指定 `history` 列出的记录。
+默认刷新应用最近一次发布。`--cached` 只读本地记录，适合离线或中断后先查看进度。查看历史版本时，用 `--release` 指定 `history` 列出的记录。
 
 ## 分别看提交、审核、上架和查询
 
@@ -53,12 +53,12 @@ android-release status demo --reconcile
 
 本地状态保护同一渠道、账号和应用的冲突写入。更改账号备注或删除记录会破坏恢复依据，请保留原记录。
 
-## 本机资料
+## 本地数据
 
-本机目录为 `~/Library/Application Support/AndroidPublisherCLI/v2/`。其中保存应用配置、冻结 APK 和图标、SQLite 发布记录、加密凭据、检查组件及 Web 私有文件。
+本地数据目录为 `~/Library/Application Support/AndroidPublisherCLI/v2/`。其中保存应用配置、冻结 APK 和图标、SQLite 发布记录、加密凭据、检查组件及 Web 私有文件。
 
-凭据以 AES-256-GCM 加密，本机钥匙串保存独立加密密钥。短期令牌和上传授权保存在私有状态。清除凭据使用 `account forget`，操作回执和未决记录仍保留。
+凭据以 AES-256-GCM 加密，macOS 钥匙串保存独立加密密钥。短期令牌和上传授权保存在私有状态。清除凭据使用 `account forget`，操作回执和未决记录仍保留。
 
-Web 上传的 APK 保留本机私有副本，供发布草稿在服务重启后恢复；正式准备后同时保存冻结产物。应用图标作为长期资料单独保存。未提交表单位于 `web-drafts/`，其中不保存账号凭据或提交授权。
+Web 上传的 APK 保留本地私有副本，供发布草稿在服务重启后恢复；正式准备后同时保存冻结产物。应用图标作为长期资料单独保存。未提交表单位于 `web-drafts/`，其中不保存账号凭据或提交授权。
 
 备份前停止 CLI 和 Web，再复制完整目录，包括数据库附属文件。备份含敏感资料。恢复后先核对商店结果，再继续发布。

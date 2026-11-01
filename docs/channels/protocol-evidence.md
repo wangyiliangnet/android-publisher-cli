@@ -28,9 +28,9 @@
 | `protocol_mock_verified: true` | 模拟响应测试通过 |
 | `account_verified: false` | 尚无逐渠道真实账号权限验证证据 |
 | `live_verified: false` | 尚无逐渠道真实公开上架验证证据 |
-| `review_query`、`availability_query` | 当前实现是否能确认本次审核、上架；仍须匹配本次版本并有本机受理记录 |
+| `review_query`、`availability_query` | 当前实现是否能确认本次审核、上架；仍须匹配本次版本并有本地受理记录 |
 | `write_reconciliation: false` | 响应丢失后不能自动确认原业务写入结果 |
-| `release_notes_max` | 本机检查的更新说明字符上限；vivo 为 200，其余为 500 |
+| `release_notes_max` | 更新说明字符上限；vivo 为 200，其余为 500 |
 | `query_note` | 关联条件及需要人工核对的范围 |
 
 模拟测试不证明商店授权或实际审核行为。状态查询还须确认结果属于本次版本，限制见[查询结果](../status-and-recovery.md#为什么有些状态一直无法确认)。
@@ -39,7 +39,7 @@
 
 ## 令牌申请失败的判断依据
 
-荣耀、OPPO 的令牌申请在发出请求前记录 `intent`。本机能证明请求未发送时，记录 `confirmed_not_applied`。完整响应明确拒绝申请时，记录 `confirmed_rejected`，允许操作者修正凭据后重试。
+荣耀、OPPO 的令牌申请在发出请求前记录 `intent`。工具能证明请求未发送时，记录 `confirmed_not_applied`。完整响应明确拒绝申请时，记录 `confirmed_rejected`，允许操作者修正凭据后重试。
 
 荣耀只识别 [OAuth 2.0 RFC 6749 第 5.2 节](https://www.rfc-editor.org/rfc/rfc6749.txt)定义的六个令牌错误值，如 `invalid_client`。HTTP `400`、`401` 的状态码本身不足以确认拒绝，响应体也必须匹配。OPPO 仅识别现有令牌接口的整数 `errno` 非零错误响应。错误响应若同时带有令牌字段，仍按未确定处理。
 

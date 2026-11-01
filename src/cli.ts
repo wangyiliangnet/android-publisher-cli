@@ -128,9 +128,9 @@ function help(context = ''): string {
   const descriptions: Record<string, string> = {
     app: 'android-release app add [应用]\nandroid-release app edit [应用]\nandroid-release app channels [应用]\nandroid-release app list [--json]\n\napp add/edit 保存应用名称和包名；app channels 添加或编辑该应用的发布渠道。首次创建无需 APK 或渠道账号。\n',
     publish: 'android-release publish [应用] [--channels huawei,honor] [--apk huawei=/绝对路径/one.apk] [--notes-file /绝对路径/notes.txt]\n\n默认全部已配置渠道，逐渠道明确指定 APK。工具检查材料与渠道，展示摘要，确认一次后提交。再次进入可继续已有发布。\n',
-    status: 'android-release status [应用] [--release 记录] [--cached] [--json] [--record-manual] [--reconcile]\n\n默认查询最近一次发布。--cached 只读本机记录；--record-manual 记录人工核对；--reconcile 只读取能够核对未决请求的远端证据。\n',
-    history: 'android-release history [应用] [--json]\n\n查看本机发布历史，不访问商店。\n',
-    account: 'android-release account add [渠道] [账号]\nandroid-release account list [--json]\nandroid-release account update [渠道] [账号]\nandroid-release account forget [渠道] [账号]\n\n密钥经终端隐藏输入，本机安全复用。JSON 和 PEM 材料要求当前用户所有、权限 0600。\n',
+    status: 'android-release status [应用] [--release 记录] [--cached] [--json] [--record-manual] [--reconcile]\n\n默认查询最近一次发布。--cached 只读本地记录；--record-manual 记录人工核对；--reconcile 只读取能够核对未决请求的远端证据。\n',
+    history: 'android-release history [应用] [--json]\n\n查看本地发布历史，不访问商店。\n',
+    account: 'android-release account add [渠道] [账号]\nandroid-release account list [--json]\nandroid-release account update [渠道] [账号]\nandroid-release account forget [渠道] [账号]\n\n密钥通过终端隐藏输入，加密保存在本地。JSON 和 PEM 材料要求当前用户所有、权限 0600。\n',
     doctor: 'android-release doctor [--repair] [--json]\n\n检查工具自带组件。--repair 自动安装固定版本的 APK 校验组件，无需手动配置 Android SDK 或 JDK。\n',
     web: 'android-release web [--port 端口] [--no-open]\n\n启动仅监听 127.0.0.1 的本地 Web 端，与 CLI 共用应用、账号和发布记录。\n',
     protocols: 'android-release protocols [--json]\n\n查看渠道查询、核对能力和真实验证范围。\n',
@@ -234,9 +234,9 @@ export async function run(args: string[], injected: { application?: PublisherApp
       }
       if (!selected) throw new Error('渠道账号不存在，请先运行 android-release account add');
       if (action === 'forget') {
-        io.write(`将清除 ${channelNames[channel]} / ${account} 的本机凭据。${selected.apps.length ? '受影响应用：' + selected.app_names.join('、') : '目前没有应用关联'}。发布回执和未决请求记录会保留。\n`);
+        io.write(`将清除 ${channelNames[channel]} / ${account} 的本地凭据。${selected.apps.length ? '受影响应用：' + selected.app_names.join('、') : '目前没有应用关联'}。发布回执和未决请求记录会保留。\n`);
         if (await io.ask('输入 yes 清除') !== 'yes') throw new Canceled();
-        application().forgetAccount(channel, account); out('本机凭据已清除。\n'); return 0;
+        application().forgetAccount(channel, account); out('本地凭据已清除。\n'); return 0;
       }
       io.suspend(); const prompt = new PromptCredentials();
       try { await application().updateAccount(channel, account, await (injected.credentials ?? prompt).forChannel(channel)); }
@@ -248,7 +248,7 @@ export async function run(args: string[], injected: { application?: PublisherApp
       const port = flags.port === undefined ? 0 : Number(flags.port);
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('端口无效');
       const server = await startWebServer(application(), { port, root: application().root });
-      out(`本地 Web 端：${server.url}\n仅本机可访问；按 Ctrl+C 停止。\n`);
+      out(`本地 Web 端：${server.url}\n仅限当前电脑访问；按 Ctrl+C 停止。\n`);
       if (!flags['no-open']) spawn('/usr/bin/open', [server.url], { stdio: 'ignore' }).on('error', () => {});
       await new Promise<void>(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
       await server.close(); return 0;

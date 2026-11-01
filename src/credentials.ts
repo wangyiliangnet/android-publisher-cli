@@ -18,7 +18,7 @@ export const credentialFields: Record<Channel, readonly string[]> = {
 const credentialIssues = {
   input: '凭据输入格式无效，请按所选渠道填写。',
   fields: '凭据字段缺失、重复或不属于该渠道，请检查输入方式。',
-  file: '无法读取私有材料。请使用属于当前用户、权限为 0600 的本机绝对文件路径，或直接粘贴材料内容。',
+  file: '无法读取凭据文件。请填写本地文件的绝对路径，文件须属于当前用户且权限为 0600；也可直接粘贴材料内容。',
   format: '凭据材料格式无效，请检查密钥及 JSON/PEM 内容。',
   account: '渠道账号不存在，请先添加渠道账号或选择已有账号。',
 } as const;

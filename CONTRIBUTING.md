@@ -19,7 +19,7 @@ npm run check
 PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 ```
 
-完整验收要求真实 APK 用例通过；工具缺失会失败。普通本机检查在工具缺失时会明确跳过该用例。测试中的 APK 和签名证书均临时生成，不使用真实应用材料。
+完整验收要求真实 APK 用例通过；工具缺失会失败。常规检查在工具缺失时会明确跳过该用例。测试中的 APK 和签名证书均临时生成，不使用真实应用材料。
 
 从源码试用 CLI，先运行 `npm run build`，再执行 `node build/cli.js --help`。需要在终端直接使用命令名时，可运行 `npm link`。
 
@@ -35,6 +35,8 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 
 每个用户概念使用[领域词汇表](GLOSSARY.md)中的名称。用户文档称 `project` 为“应用配置”，`batch` 为“发布批次”，`target` 为“渠道目标”，`approval` 为“提交计划”，并在首次出现时对应到命令字段。维护文档保留必要的状态、表和类型名称。
 
+界面、命令输出和使用文档统一用“本地”描述数据、文件和服务。环境准备称“环境检查”，APK 校验称“安装包检查”。
+
 ## 分支、检查与 PR
 
 代码 agent 使用 `codex/topic` 分支，并在本仓库配置 GitHub noreply 提交邮箱。不要直接推送、强制推送或删除 `main`。
@@ -49,7 +51,7 @@ PUBLISHER_REQUIRE_ANDROID_TESTS=1 npm run check
 
 ## 浏览器回归
 
-Web 用户旅程和凭据表单有独立的合成数据浏览器回归。普通检查跳过此项；本机已提供 Playwright 和 Chrome 时，可以启用：
+Web 用户旅程和凭据表单有独立的合成数据浏览器回归。普通检查跳过此项；已安装 Playwright 和 Chrome 时，可以启用：
 
 ```sh
 PUBLISHER_BROWSER_TESTS=1 PUBLISHER_BROWSER_CHANNEL=chrome npm run check
