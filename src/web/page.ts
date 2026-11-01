@@ -25,7 +25,7 @@ export function page(token: string): string {
     <aside class="sidebar" aria-label="主导航">
       <div class="workspace-label">应用</div>
       <nav id="navigation"></nav>
-      <div class="sidebar-bottom"><span class="tiny-dot"></span> 草稿自动保存在本地<br><span class="muted">CLI 与 Web 共用发布结果</span></div>
+      <div class="sidebar-bottom"><span class="tiny-dot"></span> 草稿自动保存在本地<br><span class="muted">CLI 与 Web 共用发布记录</span></div>
     </aside>
     <main id="main" tabindex="-1"><div class="loading-state"><span class="spinner"></span> 正在读取应用…</div></main>
   </div>

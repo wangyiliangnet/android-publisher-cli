@@ -158,7 +158,7 @@ test('arbitrary backend errors never expose secret material to the browser', asy
   assert.equal(response.status, 400);
   const body = await response.text();
   assert.doesNotMatch(body, /synthetic-secret|signed\?/);
-  assert.match(body, /渠道检查未完成/);
+  assert.match(body, /提交前检查未通过/);
 });
 
 test('Web uses the real shared application for APK-free setup and missing-credential guidance', async t => {

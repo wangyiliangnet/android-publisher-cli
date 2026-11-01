@@ -48,7 +48,7 @@ test('Web credential entry preserves multiline materials and clears every comple
   page.on('console', message => logs.push(message.text()));
   page.on('request', request => { if (request.url().endsWith('/api/upload')) uploads++; });
   const row = channel => page.locator('tr').filter({ has: page.getByText(channel + '-main', { exact: true }) });
-  const open = async channel => { await row(channel).getByRole('button', { name: /^(接入凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
+  const open = async channel => { await row(channel).getByRole('button', { name: /^(填写凭据|更新凭据)$/ }).click(); await page.locator('#credentials-form').waitFor(); };
   const saved = async channel => { await page.locator('#credentials-form').waitFor({ state: 'detached' }); await row(channel).getByRole('button', { name: '更新凭据', exact: true }).waitFor(); };
   const empty = handle => handle.evaluate(form => [...form.querySelectorAll('input,textarea')].every(control => control.value === ''));
   const noPersistence = async marker => {

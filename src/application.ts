@@ -151,14 +151,14 @@ export class PublisherApplication {
         isChannel(item.channel) && validHash(item.bindings_digest) && typeof item.connected === 'boolean' &&
         typeof item.checked_at === 'string' && Number.isFinite(Date.parse(item.checked_at))).map(item => ({
           channel: item.channel, bindings_digest: item.bindings_digest, connected: item.connected, checked_at: item.checked_at,
-          ...(item.connected ? {} : { issue: '账号访问验证未通过，请检查凭据、商店应用资料或网络后重新验证。' }),
+          ...(item.connected ? {} : { issue: '账号访问检查未通过。请检查凭据、商店应用资料或网络，再重新检查。' }),
         })) : [];
     } catch { return []; }
   }
   private saveConnection(app: Project, row: ProjectChannel, connected: boolean): void {
     const channels = this.connections(app).filter(item => item.channel !== row.channel);
     channels.push({ channel: row.channel, bindings_digest: digest([app.package_name, row]), connected,
-      checked_at: new Date().toISOString(), ...(connected ? {} : { issue: '账号访问验证未通过，请检查凭据、商店应用资料或网络后重新验证。' }) });
+      checked_at: new Date().toISOString(), ...(connected ? {} : { issue: '账号访问检查未通过。请检查凭据、商店应用资料或网络，再重新检查。' }) });
     writePrivate(this.connectionFile(app.project_id), JSON.stringify({ channels }) + '\n', true, true);
   }
   appOverviews(): Array<Record<string, unknown>> {

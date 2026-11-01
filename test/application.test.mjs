@@ -98,7 +98,7 @@ test('shared account credential updates record access separately when one applic
   const overviews = f.app.appOverviews();
   assert.equal(overviews.find(row => row.app_id === 'demo').channels[0].connected, true);
   assert.equal(overviews.find(row => row.app_id === 'other').channels[0].connected, false);
-  assert.match(overviews.find(row => row.app_id === 'other').channels[0].issue, /验证未通过/);
+  assert.match(overviews.find(row => row.app_id === 'other').channels[0].issue, /账号访问检查未通过/);
 });
 
 test('CLI creates an application without channels and reuses an independently created account', async t => {
